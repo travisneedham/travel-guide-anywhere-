@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Travel Guide</string>
+    <string name="app_subtitle">AI-powered audio tour guide</string>
+    <string name="range_label">Searching within %1$s miles</string>
+    <string name="btn_go">Start Tour</string>
+    <string name="btn_stop">Stop Tour</string>
+    <string name="status_locating">Getting your location…</string>
+    <string name="status_fetching">Finding nearby places…</string>
+    <string name="status_generating">Writing your narration…</string>
+    <string name="status_speaking">Speaking</string>
+    <string name="status_no_new_pois">All nearby places covered — keep moving!</string>
+    <string name="status_error">Error — retrying…</string>
+    <string name="narrating_label">Now: %1$s</string>
+    <string name="covered_places">Places covered</string>
+    <string name="idle_hint">Set a range and hit Start Tour to begin your audio adventure.</string>
+    <string name="settings_title">Settings</string>
+</resources>
