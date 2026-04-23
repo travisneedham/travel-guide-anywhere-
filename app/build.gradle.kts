@@ -15,12 +15,12 @@ if (localPropsFile.exists()) {
 
 android {
     namespace = "com.travelguide.anywhere"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
