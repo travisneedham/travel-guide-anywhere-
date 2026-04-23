@@ -204,7 +204,7 @@ class TourGuideService : LifecycleService() {
         while (start < text.length) {
             val end = minOf(start + maxLength, text.length)
             val splitAt = if (end < text.length) {
-                text.lastIndexOf('. ', end).takeIf { it > start } ?: end
+                text.lastIndexOf(". ", end).takeIf { it > start } ?: end
             } else end
             chunks.add(text.substring(start, splitAt).trim())
             start = splitAt
