@@ -2,10 +2,10 @@ package com.travelguide.anywhere.di
 
 import android.content.Context
 import androidx.room.Room
+import com.google.gson.Gson
 import com.travelguide.anywhere.data.local.MentionedPlaceDao
 import com.travelguide.anywhere.data.local.TourDatabase
 import com.travelguide.anywhere.data.remote.ClaudeApiService
-import com.travelguide.anywhere.data.remote.OverpassApiService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import dagger.Module
@@ -17,12 +17,15 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides
+    @Singleton
+    fun provideGson(): Gson = Gson()
 
     @Provides
     @Singleton
@@ -37,32 +40,16 @@ object AppModule {
 
     @Provides
     @Singleton
-    @Named("overpass")
-    fun provideOverpassRetrofit(client: OkHttpClient): Retrofit =
-        Retrofit.Builder()
-            .baseUrl(OverpassApiService.BASE_URL)
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-
-    @Provides
-    @Singleton
-    @Named("claude")
-    fun provideClaudeRetrofit(client: OkHttpClient): Retrofit =
+    fun provideClaudeRetrofit(client: OkHttpClient, gson: Gson): Retrofit =
         Retrofit.Builder()
             .baseUrl(ClaudeApiService.BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
 
     @Provides
     @Singleton
-    fun provideOverpassApiService(@Named("overpass") retrofit: Retrofit): OverpassApiService =
-        retrofit.create(OverpassApiService::class.java)
-
-    @Provides
-    @Singleton
-    fun provideClaudeApiService(@Named("claude") retrofit: Retrofit): ClaudeApiService =
+    fun provideClaudeApiService(retrofit: Retrofit): ClaudeApiService =
         retrofit.create(ClaudeApiService::class.java)
 
     @Provides
