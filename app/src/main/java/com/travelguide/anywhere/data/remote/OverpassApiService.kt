@@ -1,14 +1,16 @@
 package com.travelguide.anywhere.data.remote
 
 import com.travelguide.anywhere.data.remote.dto.OverpassResponse
-import retrofit2.http.GET
-import retrofit2.http.Query
+import retrofit2.http.Field
+import retrofit2.http.FormUrlEncoded
+import retrofit2.http.POST
 
 interface OverpassApiService {
 
-    @GET("api/interpreter")
+    @POST("api/interpreter")
+    @FormUrlEncoded
     suspend fun queryPois(
-        @Query("data") query: String
+        @Field("data") query: String
     ): OverpassResponse
 
     companion object {
