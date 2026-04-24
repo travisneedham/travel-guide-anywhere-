@@ -19,22 +19,21 @@ class NarrationRepository @Inject constructor(
         radiusMiles: Float,
         apiKey: String
     ): String {
-        val poiList = pois.take(3).joinToString("\n") { poi ->
-            val distStr = "%.2f".format(poi.distanceMiles)
-            val extraTags = poi.tags
-                .filterKeys { it !in listOf("name", "source", "source:date", "wikidata", "wikipedia") }
-                .entries.take(4)
-                .joinToString(", ") { (k, v) -> "$k=$v" }
-            "- ${poi.name} (${poi.shortDescription}): ${distStr} miles away${if (extraTags.isNotEmpty()) " — $extraTags" else ""}"
-        }
+        val poi = pois.first()
+        val distStr = "%.2f".format(poi.distanceMiles)
+        val extraTags = poi.tags
+            .filterKeys { it !in listOf("name", "source", "source:date", "wikidata", "wikipedia") }
+            .entries.take(4)
+            .joinToString(", ") { (k, v) -> "$k=$v" }
+        val poiLine = "- ${poi.name} (${poi.shortDescription}): ${distStr} miles away${if (extraTags.isNotEmpty()) " — $extraTags" else ""}"
 
         val locationStr = "%.4f°N, %.4f°W".format(location.latitude, Math.abs(location.longitude))
 
         val userMessage = buildString {
             append("I'm currently at coordinates $locationStr. ")
-            append("Here are ${pois.take(3).size} interesting place(s) within $radiusMiles miles of me that I haven't heard about yet:\n\n")
-            append(poiList)
-            append("\n\nPlease give me an engaging audio narration covering 1 or 2 of these places. ")
+            append("The closest interesting place to me that I haven't heard about yet is:\n\n")
+            append(poiLine)
+            append("\n\nPlease give me an engaging audio narration about this specific place. ")
             append("Start naturally, as if you're right here with me, continuing our tour together.")
         }
 

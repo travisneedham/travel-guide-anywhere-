@@ -55,7 +55,7 @@ class PoiRepository @Inject constructor(
             .filter { it.tags.containsKey("name") }
             .filter { it.osmId !in mentionedIds }
             .map { element -> element.toPlaceOfInterest(location) }
-            .sortedByDescending { it.type.interestScore }
+            .sortedBy { it.distanceMeters }
     }
 
     private fun buildQuery(lat: Double, lon: Double, radiusMeters: Int): String =
