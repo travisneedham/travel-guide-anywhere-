@@ -124,12 +124,14 @@ class TourGuideService : LifecycleService() {
 
                 emitState(TourState.GENERATING)
                 updateNotification("Writing your tour narration...")
-                emitCurrentPois(pois.take(3))
 
-                val narration = narrationRepository.generateNarration(pois, location, radiusMiles, apiKey)
+                val poi = pois.first()
+                emitCurrentPois(listOf(poi))
 
-                // Mark these POIs as mentioned before speaking
-                val toMark = pois.take(3)
+                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+
+                // Mark only this POI as mentioned before speaking
+                val toMark = listOf(poi)
                 mentionedPlaceDao.insertAll(
                     toMark.map { poi ->
                         MentionedPlaceEntity(

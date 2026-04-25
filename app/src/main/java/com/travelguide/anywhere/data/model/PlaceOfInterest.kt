@@ -11,6 +11,16 @@ data class PlaceOfInterest(
 ) {
     val distanceMiles: Float get() = distanceMeters / 1609.34f
 
+    // Higher score = more notable. wikipedia/wikidata presence is the strongest signal.
+    val fameScore: Int get() {
+        var score = type.interestScore
+        if (tags.containsKey("wikipedia")) score += 1000
+        if (tags.containsKey("wikidata")) score += 500
+        if (tags["tourism"] == "attraction") score += 200
+        if (tags["tourism"] == "museum") score += 150
+        return score
+    }
+
     val shortDescription: String get() {
         val historic = tags["historic"]
         val tourism = tags["tourism"]
