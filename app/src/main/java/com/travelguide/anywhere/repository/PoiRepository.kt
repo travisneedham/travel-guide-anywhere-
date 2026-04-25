@@ -55,9 +55,10 @@ class PoiRepository @Inject constructor(
             .filter { it.tags.containsKey("name") }
             .filter { it.osmId !in mentionedIds }
             .map { element -> element.toPlaceOfInterest(location) }
-            .sortedBy { it.distanceMeters }
             // deduplicate by name — keep the closest element when node + way exist for the same place
             .distinctBy { it.name }
+            // most notable first (wikipedia/wikidata signals fame); distance breaks ties
+            .sortedWith(compareByDescending<PlaceOfInterest> { it.fameScore }.thenBy { it.distanceMeters })
     }
 
     private fun buildQuery(lat: Double, lon: Double, radiusMeters: Int): String =
