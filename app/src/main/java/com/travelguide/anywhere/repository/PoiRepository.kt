@@ -56,25 +56,21 @@ class PoiRepository @Inject constructor(
             .filter { it.osmId !in mentionedIds }
             .map { element -> element.toPlaceOfInterest(location) }
             .sortedBy { it.distanceMeters }
+            // deduplicate by name — keep the closest element when node + way exist for the same place
+            .distinctBy { it.name }
     }
 
     private fun buildQuery(lat: Double, lon: Double, radiusMeters: Int): String =
+        // nwr = node/way/relation; ["name"] co-filter drops unnamed clutter and removes
+        // the need for a hard result cap (named POIs stay ~30-50 even in dense areas).
         "[out:json][timeout:25];\n" +
         "(\n" +
-        "  node[\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"tourism\"=\"artwork\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"tourism\"=\"viewpoint\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"amenity\"=\"place_of_worship\"][\"name\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"leisure\"=\"park\"][\"name\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"building\"=\"cathedral\"][\"name\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  relation[\"historic\"][\"name\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"tourism\"~\"attraction|museum|artwork|viewpoint\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"leisure\"=\"park\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"amenity\"=\"place_of_worship\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
-        "out body center 20;"
+        "out body center;"
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
