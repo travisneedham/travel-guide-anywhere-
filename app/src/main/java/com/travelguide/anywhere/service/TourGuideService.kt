@@ -193,9 +193,22 @@ class TourGuideService : LifecycleService() {
 
         // Split long text into chunks to avoid TTS buffer limits (~4000 chars)
         val chunks = splitIntoChunks(text)
-        chunks.forEachIndexed { index, chunk ->
-            val utteranceId = if (index == chunks.lastIndex) LAST_UTTERANCE_ID else "chunk_$index"
-            tts?.speak(chunk, TextToSpeech.QUEUE_ADD, null, utteranceId)
+        try {
+            chunks.forEachIndexed { index, chunk ->
+                val utteranceId = if (index == chunks.lastIndex) LAST_UTTERANCE_ID else "chunk_$index"
+                tts?.speak(chunk, TextToSpeech.QUEUE_ADD, null, utteranceId)
+            }
+        } catch (e: Exception) {
+            // TTS binder died (DeadObjectException) — reinitialize and retry
+            Log.w(TAG, "TTS speak failed, reinitializing: ${e.message}")
+            isSpeaking = false
+            ttsReady = false
+            tts?.shutdown()
+            initTts()
+            lifecycleScope.launch {
+                delay(3_000L)
+                speak(text, topicName)
+            }
         }
     }
 
