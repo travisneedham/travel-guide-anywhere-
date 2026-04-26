@@ -46,10 +46,12 @@ class MainFragment : Fragment() {
     }
 
     private fun setupSlider() {
-        binding.rangeSlider.value = 1.0f
+        // Slider uses integer steps (1–40) representing quarter-miles to avoid float rounding warnings.
+        binding.rangeSlider.value = 4f  // default = 1.0 mile
         binding.tvRangeLabel.text = getString(R.string.range_label, "1.0")
         binding.rangeSlider.addOnChangeListener { _, value, _ ->
-            val formatted = if (value < 1f) "%.1f".format(value) else "%.0f".format(value)
+            val miles = value / 4f
+            val formatted = if (miles < 1f) "%.2f".format(miles) else "%.1f".format(miles)
             binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
         }
     }
@@ -61,7 +63,7 @@ class MainFragment : Fragment() {
                 showApiKeyDialog()
                 return@setOnClickListener
             }
-            viewModel.startTour(binding.rangeSlider.value, apiKey)
+            viewModel.startTour(binding.rangeSlider.value / 4f, apiKey)
         }
 
         binding.btnStop.setOnClickListener {
@@ -168,7 +170,7 @@ class MainFragment : Fragment() {
             .setPositiveButton("Save & Start") { _, _ ->
                 val key = input.text?.toString()?.trim() ?: ""
                 prefs.edit().putString(PREF_API_KEY, key).apply()
-                if (key.isNotBlank()) viewModel.startTour(binding.rangeSlider.value, key)
+                if (key.isNotBlank()) viewModel.startTour(binding.rangeSlider.value / 4f, key)
             }
             .setNegativeButton("Cancel", null)
             .show()
