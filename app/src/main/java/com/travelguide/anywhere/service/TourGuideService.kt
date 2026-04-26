@@ -31,7 +31,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
@@ -54,6 +53,11 @@ class TourGuideService : LifecycleService() {
     private var generationJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
+
+    // Pause/resume state
+    private var savedChunks: List<String> = emptyList()
+    private var savedTopicName: String = ""
+    private var currentChunkIndex: Int = 0
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -80,6 +84,9 @@ class TourGuideService : LifecycleService() {
                 emitState(TourState.LOCATING)
             }
             ACTION_STOP -> stopTour()
+            ACTION_PAUSE -> pauseTour()
+            ACTION_RESUME -> resumeTour()
+            ACTION_SKIP -> skipCurrent()
         }
 
         return START_STICKY
@@ -92,7 +99,6 @@ class TourGuideService : LifecycleService() {
             .build()
         fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
 
-        // Kick off immediately with last known location
         fusedLocation.lastLocation.addOnSuccessListener { location ->
             location?.let { onLocationUpdate(it) }
         }
@@ -100,7 +106,7 @@ class TourGuideService : LifecycleService() {
 
     private fun onLocationUpdate(location: Location) {
         lastLocation = location
-        if (!isSpeaking && !isGenerating) {
+        if (!isSpeaking && !isGenerating && tourState.value != TourState.PAUSED) {
             startGenerationCycle(location)
         }
     }
@@ -130,23 +136,19 @@ class TourGuideService : LifecycleService() {
 
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
 
-                // Mark only this POI as mentioned before speaking
-                val toMark = listOf(poi)
                 mentionedPlaceDao.insertAll(
-                    toMark.map { poi ->
-                        MentionedPlaceEntity(
-                            osmId = poi.osmId,
-                            name = poi.name,
-                            lat = poi.lat,
-                            lon = poi.lon,
-                            sessionId = sessionId
-                        )
-                    }
+                    listOf(MentionedPlaceEntity(
+                        osmId = poi.osmId,
+                        name = poi.name,
+                        lat = poi.lat,
+                        lon = poi.lon,
+                        sessionId = sessionId
+                    ))
                 )
-                emitMentioned(toMark)
+                emitMentioned(listOf(poi))
 
                 isGenerating = false
-                speak(narration, toMark.firstOrNull()?.name ?: "Your tour")
+                speak(narration, poi.name)
 
             } catch (e: CancellationException) {
                 isGenerating = false
@@ -171,32 +173,91 @@ class TourGuideService : LifecycleService() {
             return
         }
 
-        // Re-read speech rate in case user changed it in settings
-        tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
+        val chunks = splitIntoChunks(text)
+        savedChunks = chunks
+        savedTopicName = topicName
+        currentChunkIndex = 0
 
+        tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
         isSpeaking = true
         emitState(TourState.SPEAKING)
         emitCurrentTopic(topicName)
         updateNotification("Now: $topicName")
 
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                utteranceId?.removePrefix("chunk_")?.toIntOrNull()?.let {
+                    currentChunkIndex = it
+                }
+            }
             override fun onDone(utteranceId: String?) {
-                isSpeaking = false
-                lastLocation?.let { startGenerationCycle(it) }
+                if (utteranceId == LAST_UTTERANCE_ID) {
+                    isSpeaking = false
+                    savedChunks = emptyList()
+                    lastLocation?.let { startGenerationCycle(it) }
+                }
             }
             override fun onError(utteranceId: String?) {
                 isSpeaking = false
+                savedChunks = emptyList()
                 lastLocation?.let { startGenerationCycle(it) }
             }
         })
 
-        // Split long text into chunks to avoid TTS buffer limits (~4000 chars)
-        val chunks = splitIntoChunks(text)
-        chunks.forEachIndexed { index, chunk ->
-            val utteranceId = if (index == chunks.lastIndex) LAST_UTTERANCE_ID else "chunk_$index"
-            tts?.speak(chunk, TextToSpeech.QUEUE_ADD, null, utteranceId)
+        enqueueChunks(chunks, startIndex = 0)
+    }
+
+    private fun enqueueChunks(chunks: List<String>, startIndex: Int) {
+        try {
+            chunks.forEachIndexed { i, chunk ->
+                val globalIndex = startIndex + i
+                val utteranceId = if (globalIndex == savedChunks.lastIndex) LAST_UTTERANCE_ID else "chunk_$globalIndex"
+                tts?.speak(chunk, TextToSpeech.QUEUE_ADD, null, utteranceId)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "TTS speak failed, reinitializing: ${e.message}")
+            isSpeaking = false
+            ttsReady = false
+            tts?.shutdown()
+            initTts()
+            lifecycleScope.launch {
+                delay(3_000L)
+                speak(savedChunks.joinToString(" "), savedTopicName)
+            }
         }
+    }
+
+    private fun pauseTour() {
+        if (!isSpeaking) return
+        tts?.stop()
+        isSpeaking = false
+        emitState(TourState.PAUSED)
+        updateNotification("Paused — ${savedTopicName}")
+    }
+
+    private fun resumeTour() {
+        if (tourState.value != TourState.PAUSED || savedChunks.isEmpty()) return
+        val remaining = savedChunks.drop(currentChunkIndex)
+        if (remaining.isEmpty()) {
+            lastLocation?.let { startGenerationCycle(it) }
+            return
+        }
+        tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
+        isSpeaking = true
+        emitState(TourState.SPEAKING)
+        updateNotification("Now: $savedTopicName")
+        enqueueChunks(remaining, startIndex = currentChunkIndex)
+    }
+
+    private fun skipCurrent() {
+        generationJob?.cancel()
+        tts?.stop()
+        isSpeaking = false
+        isGenerating = false
+        savedChunks = emptyList()
+        savedTopicName = ""
+        currentChunkIndex = 0
+        lastLocation?.let { startGenerationCycle(it) }
     }
 
     private fun splitIntoChunks(text: String, maxLength: Int = 3800): List<String> {
@@ -220,6 +281,7 @@ class TourGuideService : LifecycleService() {
         tts?.stop()
         isSpeaking = false
         isGenerating = false
+        savedChunks = emptyList()
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -239,13 +301,9 @@ class TourGuideService : LifecycleService() {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
     }
 
-    // ---- Notification helpers ----
-
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Tour Guide",
-            NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID, "Tour Guide", NotificationManager.IMPORTANCE_LOW
         ).apply { description = "Audio tour guide status" }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -266,11 +324,9 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification(text))
     }
-
-    // ---- State broadcasting via companion StateFlows ----
 
     override fun onDestroy() {
         super.onDestroy()
@@ -281,6 +337,9 @@ class TourGuideService : LifecycleService() {
     companion object {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
+        const val ACTION_PAUSE = "ACTION_PAUSE"
+        const val ACTION_RESUME = "ACTION_RESUME"
+        const val ACTION_SKIP = "ACTION_SKIP"
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val CHANNEL_ID = "tour_guide_channel"
@@ -290,7 +349,6 @@ class TourGuideService : LifecycleService() {
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         private const val TAG = "TourGuideService"
 
-        // Shared state flows — ViewModel observes these
         val tourState = MutableStateFlow(TourState.IDLE)
         val currentTopic = MutableStateFlow("")
         val currentPois = MutableStateFlow<List<PlaceOfInterest>>(emptyList())
@@ -308,5 +366,5 @@ class TourGuideService : LifecycleService() {
 }
 
 enum class TourState {
-    IDLE, LOCATING, FETCHING, GENERATING, SPEAKING, NO_NEW_POIS, ERROR
+    IDLE, LOCATING, FETCHING, GENERATING, SPEAKING, PAUSED, NO_NEW_POIS, ERROR
 }

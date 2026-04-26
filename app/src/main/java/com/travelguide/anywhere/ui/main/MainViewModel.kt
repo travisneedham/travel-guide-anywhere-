@@ -59,6 +59,22 @@ class MainViewModel @Inject constructor(
         getApplication<Application>().startService(intent)
     }
 
+    fun pauseOrResume() {
+        val action = if (tourState.value == TourState.PAUSED)
+            TourGuideService.ACTION_RESUME else TourGuideService.ACTION_PAUSE
+        val intent = Intent(getApplication(), TourGuideService::class.java).apply {
+            this.action = action
+        }
+        getApplication<Application>().startService(intent)
+    }
+
+    fun skip() {
+        val intent = Intent(getApplication(), TourGuideService::class.java).apply {
+            action = TourGuideService.ACTION_SKIP
+        }
+        getApplication<Application>().startService(intent)
+    }
+
     fun clearHistory() {
         viewModelScope.launch {
             mentionedPlaceDao.deleteAll()

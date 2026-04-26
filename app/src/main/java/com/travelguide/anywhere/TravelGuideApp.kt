@@ -1,6 +1,6 @@
-// v1.0 — Initial working release
-// Features: GPS-triggered tour loop, Overpass POI discovery, Claude AI narration,
-// Android TTS playback, foreground service, Room session deduplication.
+// v1.2 — Stable save point
+// Fixed: nwr Overpass query (Lincoln Memorial now found), fame-based POI sorting,
+// single-POI narration per cycle, TTS DeadObjectException recovery.
 package com.travelguide.anywhere
 
 import android.app.Application

@@ -9,6 +9,10 @@
     <string name="status_fetching">Finding nearby places…</string>
     <string name="status_generating">Writing your narration…</string>
     <string name="status_speaking">Speaking</string>
+    <string name="status_paused">Paused</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_resume">Resume</string>
+    <string name="btn_skip">Skip</string>
     <string name="status_no_new_pois">All nearby places covered — keep moving!</string>
     <string name="status_error">Error — retrying…</string>
     <string name="narrating_label">Now: %1$s</string>

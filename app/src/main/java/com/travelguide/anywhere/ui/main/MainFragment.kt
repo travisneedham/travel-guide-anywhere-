@@ -68,6 +68,14 @@ class MainFragment : Fragment() {
             viewModel.stopTour()
         }
 
+        binding.btnPause.setOnClickListener {
+            viewModel.pauseOrResume()
+        }
+
+        binding.btnSkip.setOnClickListener {
+            viewModel.skip()
+        }
+
         binding.btnSettings.setOnClickListener {
             showSettingsDialog()
         }
@@ -99,12 +107,24 @@ class MainFragment : Fragment() {
         binding.cardStatus.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
 
+        val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
+        binding.layoutPlaybackControls.visibility = if (showControls) View.VISIBLE else View.GONE
+
+        if (state == TourState.PAUSED) {
+            binding.btnPause.text = getString(R.string.btn_resume)
+            binding.btnPause.setIconResource(R.drawable.ic_play)
+        } else {
+            binding.btnPause.text = getString(R.string.btn_pause)
+            binding.btnPause.setIconResource(R.drawable.ic_pause)
+        }
+
         binding.tvStatus.text = when (state) {
             TourState.IDLE -> ""
             TourState.LOCATING -> getString(R.string.status_locating)
             TourState.FETCHING -> getString(R.string.status_fetching)
             TourState.GENERATING -> getString(R.string.status_generating)
             TourState.SPEAKING -> getString(R.string.status_speaking)
+            TourState.PAUSED -> getString(R.string.status_paused)
             TourState.NO_NEW_POIS -> getString(R.string.status_no_new_pois)
             TourState.ERROR -> getString(R.string.status_error)
         }
