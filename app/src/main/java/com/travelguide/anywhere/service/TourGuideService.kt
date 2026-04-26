@@ -155,8 +155,8 @@ class TourGuideService : LifecycleService() {
                 val poi = pois.first()
                 emitCurrentPois(listOf(poi))
 
-                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
-
+                // Mark as mentioned BEFORE the API call so that skip/cancel during
+                // narration generation doesn't allow the same place to repeat.
                 mentionedPlaceDao.insertAll(
                     listOf(MentionedPlaceEntity(
                         osmId = poi.osmId,
@@ -167,6 +167,8 @@ class TourGuideService : LifecycleService() {
                     ))
                 )
                 emitMentioned(listOf(poi))
+
+                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
 
                 isGenerating = false
                 speak(narration, poi.name)
