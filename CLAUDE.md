@@ -6,4 +6,4 @@ Never include GitHub URLs in responses. When code is pushed to a branch, just st
 
 ## Branch
 
-Active development branch: `claude/v1.2-playback-timeout-fix`
+Always push directly to `main`. Never create feature branches. Increment `versionCode` and `versionName` in `app/build.gradle.kts` with every push so the user can verify the build in Android Studio.
