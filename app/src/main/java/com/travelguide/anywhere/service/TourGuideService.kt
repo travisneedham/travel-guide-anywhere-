@@ -59,6 +59,11 @@ class TourGuideService : LifecycleService() {
     private var savedTopicName: String = ""
     private var currentChunkIndex: Int = 0
 
+    // In-memory name set — belt-and-suspenders alongside DB filtering.
+    // Catches the race where DB hasn't committed yet when the next cycle starts
+    // (e.g. TTS onDone fires multiple times in rapid succession).
+    private val sessionMentionedNames = mutableSetOf<String>()
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             result.lastLocation?.let { onLocationUpdate(it) }
@@ -86,9 +91,10 @@ class TourGuideService : LifecycleService() {
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
                 emitState(TourState.LOCATING)
-                // Restore previously mentioned places into the UI chip list.
+                // Restore previously mentioned places: populate in-memory set and UI chip list.
                 lifecycleScope.launch {
                     val prior = mentionedPlaceDao.getBySession(sessionId)
+                    prior.forEach { entity -> sessionMentionedNames.add(entity.name) }
                     if (prior.isNotEmpty()) {
                         mentionedPlaces.value = prior.map { entity ->
                             com.travelguide.anywhere.data.model.PlaceOfInterest(
@@ -133,14 +139,26 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun startGenerationCycle(location: Location) {
-        generationJob?.cancel()
+        // Guard: don't start a new cycle if one is already running.
+        // This prevents the double-trigger bug where TTS onDone/onError fires
+        // multiple times from its background thread, each call cancelling the
+        // previous job before the DB insert can land.
+        if (generationJob?.isActive == true) return
+
         generationJob = lifecycleScope.launch {
             try {
                 isGenerating = true
                 emitState(TourState.FETCHING)
                 updateNotification("Finding interesting places nearby...")
 
+                // DB-filtered list, then apply in-memory set for belt-and-suspenders.
                 val pois = poiRepository.fetchUnmentionedPois(location, radiusMiles, sessionId)
+                    .filterNot { poi ->
+                        sessionMentionedNames.any { mentioned ->
+                            poi.name.contains(mentioned, ignoreCase = true) ||
+                            mentioned.contains(poi.name, ignoreCase = true)
+                        }
+                    }
 
                 if (pois.isEmpty()) {
                     emitState(TourState.NO_NEW_POIS)
@@ -153,10 +171,11 @@ class TourGuideService : LifecycleService() {
                 updateNotification("Writing your tour narration...")
 
                 val poi = pois.first()
+                // Add to in-memory set immediately — before DB write and before the API
+                // call — so even a cancellation can't bring this place back.
+                sessionMentionedNames.add(poi.name)
                 emitCurrentPois(listOf(poi))
 
-                // Mark as mentioned BEFORE the API call so that skip/cancel during
-                // narration generation doesn't allow the same place to repeat.
                 mentionedPlaceDao.insertAll(
                     listOf(MentionedPlaceEntity(
                         osmId = poi.osmId,
@@ -182,6 +201,8 @@ class TourGuideService : LifecycleService() {
                 emitError(e.message ?: "Unknown error")
                 updateNotification("Error — retrying shortly...")
                 delay(15_000L)
+                // Null out generationJob so the isActive guard doesn't block the retry.
+                generationJob = null
                 lastLocation?.let { startGenerationCycle(it) }
             }
         }
@@ -217,13 +238,15 @@ class TourGuideService : LifecycleService() {
                 if (utteranceId == LAST_UTTERANCE_ID) {
                     isSpeaking = false
                     savedChunks = emptyList()
-                    lastLocation?.let { startGenerationCycle(it) }
+                    // Route through onLocationUpdate so the !isGenerating guard
+                    // deduplicates any repeated onDone callbacks from the TTS thread.
+                    lifecycleScope.launch { lastLocation?.let { onLocationUpdate(it) } }
                 }
             }
             override fun onError(utteranceId: String?) {
                 isSpeaking = false
                 savedChunks = emptyList()
-                lastLocation?.let { startGenerationCycle(it) }
+                lifecycleScope.launch { lastLocation?.let { onLocationUpdate(it) } }
             }
         })
 
@@ -307,6 +330,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         savedChunks = emptyList()
+        sessionMentionedNames.clear()
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
