@@ -50,10 +50,12 @@ class PoiRepository @Inject constructor(
 
         val overpassResponse = gson.fromJson(responseJson, OverpassResponse::class.java)
         val mentionedIds = mentionedPlaceDao.getOsmIdsBySession(sessionId).toSet()
+        val mentionedNames = mentionedPlaceDao.getNamesBySession(sessionId).toSet()
 
         overpassResponse.elements
             .filter { it.tags.containsKey("name") }
             .filter { it.osmId !in mentionedIds }
+            .filter { (it.tags["name"] ?: "") !in mentionedNames }
             .map { element -> element.toPlaceOfInterest(location) }
             // deduplicate by name — keep the closest element when node + way exist for the same place
             .distinctBy { it.name }

@@ -17,6 +17,9 @@ interface MentionedPlaceDao {
     @Query("SELECT osmId FROM mentioned_places WHERE sessionId = :sessionId")
     suspend fun getOsmIdsBySession(sessionId: String): List<String>
 
+    @Query("SELECT name FROM mentioned_places WHERE sessionId = :sessionId")
+    suspend fun getNamesBySession(sessionId: String): List<String>
+
     @Query("SELECT * FROM mentioned_places WHERE sessionId = :sessionId ORDER BY mentionedAt DESC")
     suspend fun getBySession(sessionId: String): List<MentionedPlaceEntity>
 

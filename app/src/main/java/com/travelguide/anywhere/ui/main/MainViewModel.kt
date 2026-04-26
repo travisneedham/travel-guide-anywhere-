@@ -37,11 +37,10 @@ class MainViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun startTour(radiusMiles: Float, apiKey: String) {
-        // Reset shared state
+        // Reset transient state but NOT mentionedPlaces — the service reloads it from DB.
         TourGuideService.tourState.value = TourState.LOCATING
         TourGuideService.currentTopic.value = ""
         TourGuideService.currentPois.value = emptyList()
-        TourGuideService.mentionedPlaces.value = emptyList()
         TourGuideService.errorMessage.value = null
 
         val intent = Intent(getApplication(), TourGuideService::class.java).apply {
@@ -79,6 +78,10 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             mentionedPlaceDao.deleteAll()
             TourGuideService.mentionedPlaces.value = emptyList()
+            // Force a new session ID next time the tour starts.
+            getApplication<Application>()
+                .getSharedPreferences(TourGuideService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                .edit().remove(TourGuideService.PREF_SESSION_ID).apply()
         }
     }
 }
