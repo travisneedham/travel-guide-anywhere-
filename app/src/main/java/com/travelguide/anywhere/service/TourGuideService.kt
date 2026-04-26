@@ -76,12 +76,33 @@ class TourGuideService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START -> {
-                sessionId = UUID.randomUUID().toString()
+                // Reuse the persisted session ID so already-mentioned POIs survive app restarts.
+                sessionId = sharedPrefs.getString(PREF_SESSION_ID, null)
+                    ?: UUID.randomUUID().toString().also {
+                        sharedPrefs.edit().putString(PREF_SESSION_ID, it).apply()
+                    }
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
                 emitState(TourState.LOCATING)
+                // Restore previously mentioned places into the UI chip list.
+                lifecycleScope.launch {
+                    val prior = mentionedPlaceDao.getBySession(sessionId)
+                    if (prior.isNotEmpty()) {
+                        mentionedPlaces.value = prior.map { entity ->
+                            com.travelguide.anywhere.data.model.PlaceOfInterest(
+                                osmId = entity.osmId,
+                                name = entity.name,
+                                lat = entity.lat,
+                                lon = entity.lon,
+                                type = com.travelguide.anywhere.data.model.PoiType.OTHER,
+                                tags = emptyMap(),
+                                distanceMeters = 0f
+                            )
+                        }.take(20)
+                    }
+                }
             }
             ACTION_STOP -> stopTour()
             ACTION_PAUSE -> pauseTour()
@@ -229,6 +250,7 @@ class TourGuideService : LifecycleService() {
 
     private fun pauseTour() {
         if (!isSpeaking) return
+        tts?.setOnUtteranceProgressListener(null)
         tts?.stop()
         isSpeaking = false
         emitState(TourState.PAUSED)
@@ -251,6 +273,7 @@ class TourGuideService : LifecycleService() {
 
     private fun skipCurrent() {
         generationJob?.cancel()
+        tts?.setOnUtteranceProgressListener(null)
         tts?.stop()
         isSpeaking = false
         isGenerating = false
@@ -347,6 +370,7 @@ class TourGuideService : LifecycleService() {
         const val LAST_UTTERANCE_ID = "last_utterance"
         const val PREFS_NAME = "tour_prefs"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
+        const val PREF_SESSION_ID = "pref_session_id"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)
