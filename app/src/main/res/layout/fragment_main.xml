@@ -87,6 +87,7 @@
                     android:valueTo="40"
                     android:stepSize="1"
                     android:value="4"
+                    app:labelBehavior="gone"
                     app:thumbColor="@color/accent"
                     app:trackColorActive="@color/accent"
                     app:trackColorInactive="@color/stroke" />
