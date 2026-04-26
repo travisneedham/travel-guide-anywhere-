@@ -55,7 +55,15 @@ class PoiRepository @Inject constructor(
         overpassResponse.elements
             .filter { it.tags.containsKey("name") }
             .filter { it.osmId !in mentionedIds }
-            .filter { (it.tags["name"] ?: "") !in mentionedNames }
+            // Exact-name match AND substring match: filters out "Lincoln Memorial Reflecting Pool"
+            // after "Lincoln Memorial" has been mentioned, since they're the same landmark.
+            .filter { element ->
+                val name = element.tags["name"] ?: ""
+                name !in mentionedNames && mentionedNames.none { mentioned ->
+                    name.contains(mentioned, ignoreCase = true) ||
+                    mentioned.contains(name, ignoreCase = true)
+                }
+            }
             .map { element -> element.toPlaceOfInterest(location) }
             // deduplicate by name — keep the closest element when node + way exist for the same place
             .distinctBy { it.name }
