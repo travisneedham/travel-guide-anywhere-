@@ -2,7 +2,6 @@ package com.travelguide.anywhere.repository
 
 import android.location.Location
 import com.google.gson.Gson
-import com.travelguide.anywhere.data.local.MentionedPlaceDao
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.PoiType
 import com.travelguide.anywhere.data.remote.dto.OverpassElement
@@ -18,14 +17,12 @@ import javax.inject.Singleton
 @Singleton
 class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val gson: Gson,
-    private val mentionedPlaceDao: MentionedPlaceDao
+    private val gson: Gson
 ) {
 
-    suspend fun fetchUnmentionedPois(
+    suspend fun fetchPois(
         location: Location,
-        radiusMiles: Float,
-        sessionId: String
+        radiusMiles: Float
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
         val query = buildQuery(location.latitude, location.longitude, radiusMeters)
@@ -49,25 +46,11 @@ class PoiRepository @Inject constructor(
         }
 
         val overpassResponse = gson.fromJson(responseJson, OverpassResponse::class.java)
-        val mentionedIds = mentionedPlaceDao.getOsmIdsBySession(sessionId).toSet()
-        val mentionedNames = mentionedPlaceDao.getNamesBySession(sessionId).toSet()
 
         overpassResponse.elements
             .filter { it.tags.containsKey("name") }
-            .filter { it.osmId !in mentionedIds }
-            // Exact-name match AND substring match: filters out "Lincoln Memorial Reflecting Pool"
-            // after "Lincoln Memorial" has been mentioned, since they're the same landmark.
-            .filter { element ->
-                val name = element.tags["name"] ?: ""
-                name !in mentionedNames && mentionedNames.none { mentioned ->
-                    name.contains(mentioned, ignoreCase = true) ||
-                    mentioned.contains(name, ignoreCase = true)
-                }
-            }
             .map { element -> element.toPlaceOfInterest(location) }
-            // deduplicate by name — keep the closest element when node + way exist for the same place
             .distinctBy { it.name }
-            // most notable first (wikipedia/wikidata signals fame); distance breaks ties
             .sortedWith(compareByDescending<PlaceOfInterest> { it.fameScore }.thenBy { it.distanceMeters })
     }
 

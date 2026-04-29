@@ -21,8 +21,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.Priority
 import com.travelguide.anywhere.MainActivity
 import com.travelguide.anywhere.R
-import com.travelguide.anywhere.data.local.MentionedPlaceDao
-import com.travelguide.anywhere.data.local.MentionedPlaceEntity
+import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiRepository
@@ -33,7 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
-import java.util.UUID
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -42,11 +40,10 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var fusedLocation: FusedLocationProviderClient
     @Inject lateinit var poiRepository: PoiRepository
     @Inject lateinit var narrationRepository: NarrationRepository
-    @Inject lateinit var mentionedPlaceDao: MentionedPlaceDao
+    @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private var sessionId = ""
     private var radiusMiles = 1f
     private var apiKey = ""
     private var lastLocation: Location? = null
@@ -54,15 +51,14 @@ class TourGuideService : LifecycleService() {
     private var isSpeaking = false
     private var isGenerating = false
 
+    // Tracks which POI is currently being spoken, and when speaking started.
+    @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
+    @Volatile private var speakStartTime: Long = 0L
+
     // Pause/resume state
     private var savedChunks: List<String> = emptyList()
     private var savedTopicName: String = ""
     private var currentChunkIndex: Int = 0
-
-    // In-memory name set — belt-and-suspenders alongside DB filtering.
-    // Catches the race where DB hasn't committed yet when the next cycle starts
-    // (e.g. TTS onDone fires multiple times in rapid succession).
-    private val sessionMentionedNames = mutableSetOf<String>()
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -81,34 +77,15 @@ class TourGuideService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START -> {
-                // Reuse the persisted session ID so already-mentioned POIs survive app restarts.
-                sessionId = sharedPrefs.getString(PREF_SESSION_ID, null)
-                    ?: UUID.randomUUID().toString().also {
-                        sharedPrefs.edit().putString(PREF_SESSION_ID, it).apply()
-                    }
+                // Load the persistent history file. This clears in-memory state and
+                // repopulates from disk so already-heard POIs are excluded immediately.
+                mentionedPlacesStore.load()
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
                 emitState(TourState.LOCATING)
-                // Restore previously mentioned places: populate in-memory set and UI chip list.
-                lifecycleScope.launch {
-                    val prior = mentionedPlaceDao.getBySession(sessionId)
-                    prior.forEach { entity -> sessionMentionedNames.add(entity.name) }
-                    if (prior.isNotEmpty()) {
-                        mentionedPlaces.value = prior.map { entity ->
-                            com.travelguide.anywhere.data.model.PlaceOfInterest(
-                                osmId = entity.osmId,
-                                name = entity.name,
-                                lat = entity.lat,
-                                lon = entity.lon,
-                                type = com.travelguide.anywhere.data.model.PoiType.OTHER,
-                                tags = emptyMap(),
-                                distanceMeters = 0f
-                            )
-                        }.take(20)
-                    }
-                }
+                mentionedPlaces.value = mentionedPlacesStore.recentFive()
             }
             ACTION_STOP -> stopTour()
             ACTION_PAUSE -> pauseTour()
@@ -140,9 +117,6 @@ class TourGuideService : LifecycleService() {
 
     private fun startGenerationCycle(location: Location) {
         // Guard: don't start a new cycle if one is already running.
-        // This prevents the double-trigger bug where TTS onDone/onError fires
-        // multiple times from its background thread, each call cancelling the
-        // previous job before the DB insert can land.
         if (generationJob?.isActive == true) return
 
         generationJob = lifecycleScope.launch {
@@ -151,14 +125,11 @@ class TourGuideService : LifecycleService() {
                 emitState(TourState.FETCHING)
                 updateNotification("Finding interesting places nearby...")
 
-                // DB-filtered list, then apply in-memory set for belt-and-suspenders.
-                val pois = poiRepository.fetchUnmentionedPois(location, radiusMiles, sessionId)
-                    .filterNot { poi ->
-                        sessionMentionedNames.any { mentioned ->
-                            poi.name.contains(mentioned, ignoreCase = true) ||
-                            mentioned.contains(poi.name, ignoreCase = true)
-                        }
-                    }
+                // Fetch all named POIs, then filter using the store's in-memory name set.
+                // The store's sessionNames contains both disk-persisted names (loaded on start)
+                // and current-session picks (added immediately on selection below).
+                val pois = poiRepository.fetchPois(location, radiusMiles)
+                    .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
 
                 if (pois.isEmpty()) {
                     emitState(TourState.NO_NEW_POIS)
@@ -171,21 +142,11 @@ class TourGuideService : LifecycleService() {
                 updateNotification("Writing your tour narration...")
 
                 val poi = pois.first()
-                // Add to in-memory set immediately — before DB write and before the API
-                // call — so even a cancellation can't bring this place back.
-                sessionMentionedNames.add(poi.name)
+                // Add to session names immediately — before the API call — so even a
+                // cancellation can't bring this POI back in the same session.
+                mentionedPlacesStore.sessionNames.add(poi.name)
+                currentNarrationPoi = poi
                 emitCurrentPois(listOf(poi))
-
-                mentionedPlaceDao.insertAll(
-                    listOf(MentionedPlaceEntity(
-                        osmId = poi.osmId,
-                        name = poi.name,
-                        lat = poi.lat,
-                        lon = poi.lon,
-                        sessionId = sessionId
-                    ))
-                )
-                emitMentioned(listOf(poi))
 
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
 
@@ -201,7 +162,6 @@ class TourGuideService : LifecycleService() {
                 emitError(e.message ?: "Unknown error")
                 updateNotification("Error — retrying shortly...")
                 delay(15_000L)
-                // Null out generationJob so the isActive guard doesn't block the retry.
                 generationJob = null
                 lastLocation?.let { startGenerationCycle(it) }
             }
@@ -221,6 +181,7 @@ class TourGuideService : LifecycleService() {
         savedChunks = chunks
         savedTopicName = topicName
         currentChunkIndex = 0
+        speakStartTime = System.currentTimeMillis()
 
         tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
         isSpeaking = true
@@ -236,14 +197,23 @@ class TourGuideService : LifecycleService() {
             }
             override fun onDone(utteranceId: String?) {
                 if (utteranceId == LAST_UTTERANCE_ID) {
+                    val duration = System.currentTimeMillis() - speakStartTime
+                    val poi = currentNarrationPoi
+                    currentNarrationPoi = null
                     isSpeaking = false
                     savedChunks = emptyList()
-                    // Route through onLocationUpdate so the !isGenerating guard
-                    // deduplicates any repeated onDone callbacks from the TTS thread.
-                    lifecycleScope.launch { lastLocation?.let { onLocationUpdate(it) } }
+                    lifecycleScope.launch {
+                        // Commit to disk only if the narration played for at least 10 seconds.
+                        if (poi != null && duration >= 10_000L) {
+                            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+                            mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                        }
+                        lastLocation?.let { onLocationUpdate(it) }
+                    }
                 }
             }
             override fun onError(utteranceId: String?) {
+                currentNarrationPoi = null
                 isSpeaking = false
                 savedChunks = emptyList()
                 lifecycleScope.launch { lastLocation?.let { onLocationUpdate(it) } }
@@ -297,6 +267,13 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun skipCurrent() {
+        // Commit the skipped POI to disk so it's not repeated next session.
+        val poi = currentNarrationPoi
+        if (poi != null) {
+            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+            mentionedPlaces.value = mentionedPlacesStore.recentFive()
+        }
+        currentNarrationPoi = null
         generationJob?.cancel()
         tts?.setOnUtteranceProgressListener(null)
         tts?.stop()
@@ -324,13 +301,13 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun stopTour() {
+        currentNarrationPoi = null
         generationJob?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
         tts?.stop()
         isSpeaking = false
         isGenerating = false
         savedChunks = emptyList()
-        sessionMentionedNames.clear()
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -400,21 +377,17 @@ class TourGuideService : LifecycleService() {
         const val LAST_UTTERANCE_ID = "last_utterance"
         const val PREFS_NAME = "tour_prefs"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
-        const val PREF_SESSION_ID = "pref_session_id"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)
         val currentTopic = MutableStateFlow("")
         val currentPois = MutableStateFlow<List<PlaceOfInterest>>(emptyList())
-        val mentionedPlaces = MutableStateFlow<List<PlaceOfInterest>>(emptyList())
+        val mentionedPlaces = MutableStateFlow<List<MentionedPlacesStore.Entry>>(emptyList())
         val errorMessage = MutableStateFlow<String?>(null)
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }
         private fun emitCurrentPois(pois: List<PlaceOfInterest>) { currentPois.value = pois }
-        private fun emitMentioned(pois: List<PlaceOfInterest>) {
-            mentionedPlaces.value = (pois + mentionedPlaces.value).take(20)
-        }
         private fun emitError(msg: String) { errorMessage.value = msg }
     }
 }

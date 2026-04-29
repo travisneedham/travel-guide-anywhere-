@@ -214,12 +214,12 @@
             android:visibility="gone"
             android:layout_marginBottom="8dp" />
 
-        <com.google.android.material.chip.ChipGroup
-            android:id="@+id/chip_group_mentioned"
+        <LinearLayout
+            android:id="@+id/ll_mentioned_places"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="32dp"
-            app:chipSpacingHorizontal="8dp" />
+            android:orientation="vertical"
+            android:layout_marginBottom="32dp" />
 
         <!-- GO button -->
         <com.google.android.material.button.MaterialButton

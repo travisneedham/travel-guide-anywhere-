@@ -4,7 +4,7 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.travelguide.anywhere.data.local.MentionedPlaceDao
+import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
@@ -18,7 +18,7 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     application: Application,
-    private val mentionedPlaceDao: MentionedPlaceDao
+    private val mentionedPlacesStore: MentionedPlacesStore
 ) : AndroidViewModel(application) {
 
     val tourState: StateFlow<TourState> = TourGuideService.tourState
@@ -30,14 +30,13 @@ class MainViewModel @Inject constructor(
     val currentPois: StateFlow<List<PlaceOfInterest>> = TourGuideService.currentPois
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val mentionedPlaces: StateFlow<List<PlaceOfInterest>> = TourGuideService.mentionedPlaces
+    val mentionedPlaces: StateFlow<List<MentionedPlacesStore.Entry>> = TourGuideService.mentionedPlaces
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val errorMessage: StateFlow<String?> = TourGuideService.errorMessage
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun startTour(radiusMiles: Float, apiKey: String) {
-        // Reset transient state but NOT mentionedPlaces — the service reloads it from DB.
         TourGuideService.tourState.value = TourState.LOCATING
         TourGuideService.currentTopic.value = ""
         TourGuideService.currentPois.value = emptyList()
@@ -76,12 +75,8 @@ class MainViewModel @Inject constructor(
 
     fun clearHistory() {
         viewModelScope.launch {
-            mentionedPlaceDao.deleteAll()
+            mentionedPlacesStore.clear()
             TourGuideService.mentionedPlaces.value = emptyList()
-            // Force a new session ID next time the tour starts.
-            getApplication<Application>()
-                .getSharedPreferences(TourGuideService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                .edit().remove(TourGuideService.PREF_SESSION_ID).apply()
         }
     }
 }

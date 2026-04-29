@@ -1,10 +1,7 @@
 package com.travelguide.anywhere.di
 
 import android.content.Context
-import androidx.room.Room
 import com.google.gson.Gson
-import com.travelguide.anywhere.data.local.MentionedPlaceDao
-import com.travelguide.anywhere.data.local.TourDatabase
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -55,18 +52,6 @@ object AppModule {
     @Singleton
     fun provideClaudeApiService(retrofit: Retrofit): ClaudeApiService =
         retrofit.create(ClaudeApiService::class.java)
-
-    @Provides
-    @Singleton
-    fun provideTourDatabase(@ApplicationContext context: Context): TourDatabase =
-        Room.databaseBuilder(context, TourDatabase::class.java, "tour_db")
-            .fallbackToDestructiveMigration()
-            .build()
-
-    @Provides
-    @Singleton
-    fun provideMentionedPlaceDao(db: TourDatabase): MentionedPlaceDao =
-        db.mentionedPlaceDao()
 
     @Provides
     @Singleton

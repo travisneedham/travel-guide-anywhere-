@@ -21,8 +21,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.5.2"
+        versionCode = 9
+        versionName = "1.5.3"
 
         buildConfigField(
             "String",
@@ -78,11 +78,6 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp.logging)
-
-    // Room
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
 
     // Coroutines
     implementation(libs.coroutines.android)

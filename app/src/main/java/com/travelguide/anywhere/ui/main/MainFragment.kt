@@ -5,21 +5,25 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.google.android.material.chip.Chip
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
+import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.databinding.FragmentMainBinding
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -46,7 +50,6 @@ class MainFragment : Fragment() {
     }
 
     private fun setupSlider() {
-        // Slider uses integer steps (1–40) representing quarter-miles to avoid float rounding warnings.
         binding.rangeSlider.value = 4f  // default = 1.0 mile
         binding.tvRangeLabel.text = getString(R.string.range_label, "1.0")
         binding.rangeSlider.addOnChangeListener { _, value, _ ->
@@ -93,7 +96,7 @@ class MainFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { viewModel.tourState.collect { updateUiForState(it) } }
                 launch { viewModel.currentTopic.collect { updateCurrentTopic(it) } }
-                launch { viewModel.mentionedPlaces.collect { updateMentionedChips(it.map { p -> p.name }) } }
+                launch { viewModel.mentionedPlaces.collect { updateMentionedList(it) } }
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 }}}
@@ -146,16 +149,31 @@ class MainFragment : Fragment() {
         }
     }
 
-    private fun updateMentionedChips(names: List<String>) {
-        binding.chipGroupMentioned.removeAllViews()
-        names.forEach { name ->
-            val chip = Chip(requireContext()).apply {
-                text = name
-                isClickable = false
-            }
-            binding.chipGroupMentioned.addView(chip)
+    private fun updateMentionedList(entries: List<MentionedPlacesStore.Entry>) {
+        binding.llMentionedPlaces.removeAllViews()
+        if (entries.isEmpty()) {
+            binding.tvMentionedLabel.visibility = View.GONE
+            return
         }
-        binding.tvMentionedLabel.visibility = if (names.isEmpty()) View.GONE else View.VISIBLE
+        binding.tvMentionedLabel.visibility = View.VISIBLE
+        val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+        entries.forEachIndexed { index, entry ->
+            val row = LayoutInflater.from(requireContext())
+                .inflate(R.layout.item_mentioned_place, binding.llMentionedPlaces, false)
+            row.findViewById<TextView>(R.id.tv_place_name).text = entry.name
+            row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
+            binding.llMentionedPlaces.addView(row)
+
+            if (index < entries.lastIndex) {
+                val divider = View(requireContext()).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                    setBackgroundColor(
+                        requireContext().getColor(R.color.stroke)
+                    )
+                }
+                binding.llMentionedPlaces.addView(divider)
+            }
+        }
     }
 
     private fun showApiKeyDialog() {
