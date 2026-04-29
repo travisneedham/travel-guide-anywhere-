@@ -203,6 +203,7 @@ class TourGuideService : LifecycleService() {
                     isSpeaking = false
                     savedChunks = emptyList()
                     lifecycleScope.launch {
+                        emitCurrentTopic("")
                         // Commit to disk only if the narration played for at least 10 seconds.
                         if (poi != null && duration >= 10_000L) {
                             mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
@@ -216,7 +217,10 @@ class TourGuideService : LifecycleService() {
                 currentNarrationPoi = null
                 isSpeaking = false
                 savedChunks = emptyList()
-                lifecycleScope.launch { lastLocation?.let { onLocationUpdate(it) } }
+                lifecycleScope.launch {
+                    emitCurrentTopic("")
+                    lastLocation?.let { onLocationUpdate(it) }
+                }
             }
         })
 
@@ -274,6 +278,7 @@ class TourGuideService : LifecycleService() {
             mentionedPlaces.value = mentionedPlacesStore.recentFive()
         }
         currentNarrationPoi = null
+        emitCurrentTopic("")
         generationJob?.cancel()
         tts?.setOnUtteranceProgressListener(null)
         tts?.stop()
