@@ -8,8 +8,6 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.location.Location
 import android.os.Looper
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -31,7 +29,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -42,23 +39,17 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
 
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private var ttsEngine: TtsEngine? = null
     private var radiusMiles = 1f
     private var apiKey = ""
     private var lastLocation: Location? = null
     private var generationJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
+    private var savedTopicName = ""
 
-    // Tracks which POI is currently being spoken, and when speaking started.
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
     @Volatile private var speakStartTime: Long = 0L
-
-    // Pause/resume state
-    private var savedChunks: List<String> = emptyList()
-    private var savedTopicName: String = ""
-    private var currentChunkIndex: Int = 0
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -69,7 +60,7 @@ class TourGuideService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        initTts()
+        initTtsEngine()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -77,8 +68,8 @@ class TourGuideService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START -> {
-                // Load the persistent history file. This clears in-memory state and
-                // repopulates from disk so already-heard POIs are excluded immediately.
+                // Re-init engine in case provider/keys changed since last run.
+                initTtsEngine()
                 mentionedPlacesStore.load()
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
@@ -102,10 +93,7 @@ class TourGuideService : LifecycleService() {
             .setMinUpdateDistanceMeters(50f)
             .build()
         fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
-
-        fusedLocation.lastLocation.addOnSuccessListener { location ->
-            location?.let { onLocationUpdate(it) }
-        }
+        fusedLocation.lastLocation.addOnSuccessListener { it?.let { loc -> onLocationUpdate(loc) } }
     }
 
     private fun onLocationUpdate(location: Location) {
@@ -116,7 +104,6 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun startGenerationCycle(location: Location) {
-        // Guard: don't start a new cycle if one is already running.
         if (generationJob?.isActive == true) return
 
         generationJob = lifecycleScope.launch {
@@ -125,9 +112,6 @@ class TourGuideService : LifecycleService() {
                 emitState(TourState.FETCHING)
                 updateNotification("Finding interesting places nearby...")
 
-                // Fetch all named POIs, then filter using the store's in-memory name set.
-                // The store's sessionNames contains both disk-persisted names (loaded on start)
-                // and current-session picks (added immediately on selection below).
                 val pois = poiRepository.fetchPois(location, radiusMiles)
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
 
@@ -142,14 +126,11 @@ class TourGuideService : LifecycleService() {
                 updateNotification("Writing your tour narration...")
 
                 val poi = pois.first()
-                // Add to session names immediately — before the API call — so even a
-                // cancellation can't bring this POI back in the same session.
                 mentionedPlacesStore.sessionNames.add(poi.name)
                 currentNarrationPoi = poi
                 emitCurrentPois(listOf(poi))
 
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
-
                 isGenerating = false
                 speak(narration, poi.name)
 
@@ -169,7 +150,8 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun speak(text: String, topicName: String) {
-        if (!ttsReady) {
+        val engine = ttsEngine
+        if (engine == null || !engine.isReady) {
             lifecycleScope.launch {
                 delay(2_000L)
                 speak(text, topicName)
@@ -177,101 +159,63 @@ class TourGuideService : LifecycleService() {
             return
         }
 
-        val chunks = splitIntoChunks(text)
-        savedChunks = chunks
         savedTopicName = topicName
-        currentChunkIndex = 0
         speakStartTime = System.currentTimeMillis()
-
-        tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
         isSpeaking = true
         emitState(TourState.SPEAKING)
         emitCurrentTopic(topicName)
         updateNotification("Now: $topicName")
 
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {
-                utteranceId?.removePrefix("chunk_")?.toIntOrNull()?.let {
-                    currentChunkIndex = it
-                }
-            }
-            override fun onDone(utteranceId: String?) {
-                if (utteranceId == LAST_UTTERANCE_ID) {
-                    val duration = System.currentTimeMillis() - speakStartTime
-                    val poi = currentNarrationPoi
-                    currentNarrationPoi = null
-                    isSpeaking = false
-                    savedChunks = emptyList()
-                    lifecycleScope.launch {
-                        emitCurrentTopic("")
-                        // Commit to disk only if the narration played for at least 10 seconds.
-                        if (poi != null && duration >= 10_000L) {
-                            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
-                            mentionedPlaces.value = mentionedPlacesStore.recentFive()
-                        }
-                        lastLocation?.let { onLocationUpdate(it) }
-                    }
-                }
-            }
-            override fun onError(utteranceId: String?) {
+        engine.speak(
+            text = text,
+            speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f),
+            onDone = {
+                val duration = System.currentTimeMillis() - speakStartTime
+                val poi = currentNarrationPoi
                 currentNarrationPoi = null
                 isSpeaking = false
-                savedChunks = emptyList()
+                lifecycleScope.launch {
+                    emitCurrentTopic("")
+                    if (poi != null && duration >= 10_000L) {
+                        mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+                        mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                    }
+                    lastLocation?.let { onLocationUpdate(it) }
+                }
+            },
+            onError = {
+                currentNarrationPoi = null
+                isSpeaking = false
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     lastLocation?.let { onLocationUpdate(it) }
                 }
             }
-        })
-
-        enqueueChunks(chunks, startIndex = 0)
-    }
-
-    private fun enqueueChunks(chunks: List<String>, startIndex: Int) {
-        try {
-            chunks.forEachIndexed { i, chunk ->
-                val globalIndex = startIndex + i
-                val utteranceId = if (globalIndex == savedChunks.lastIndex) LAST_UTTERANCE_ID else "chunk_$globalIndex"
-                tts?.speak(chunk, TextToSpeech.QUEUE_ADD, null, utteranceId)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "TTS speak failed, reinitializing: ${e.message}")
-            isSpeaking = false
-            ttsReady = false
-            tts?.shutdown()
-            initTts()
-            lifecycleScope.launch {
-                delay(3_000L)
-                speak(savedChunks.joinToString(" "), savedTopicName)
-            }
-        }
+        )
     }
 
     private fun pauseTour() {
         if (!isSpeaking) return
-        tts?.setOnUtteranceProgressListener(null)
-        tts?.stop()
+        ttsEngine?.pause()
         isSpeaking = false
         emitState(TourState.PAUSED)
-        updateNotification("Paused — ${savedTopicName}")
+        updateNotification("Paused — $savedTopicName")
     }
 
     private fun resumeTour() {
-        if (tourState.value != TourState.PAUSED || savedChunks.isEmpty()) return
-        val remaining = savedChunks.drop(currentChunkIndex)
-        if (remaining.isEmpty()) {
+        if (tourState.value != TourState.PAUSED) return
+        val engine = ttsEngine ?: return
+        if (!engine.canResume) {
             lastLocation?.let { startGenerationCycle(it) }
             return
         }
-        tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
         isSpeaking = true
         emitState(TourState.SPEAKING)
         updateNotification("Now: $savedTopicName")
-        enqueueChunks(remaining, startIndex = currentChunkIndex)
+        engine.resume()
     }
 
     private fun skipCurrent() {
-        // Commit the skipped POI to disk so it's not repeated next session.
         val poi = currentNarrationPoi
         if (poi != null) {
             mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
@@ -280,57 +224,46 @@ class TourGuideService : LifecycleService() {
         currentNarrationPoi = null
         emitCurrentTopic("")
         generationJob?.cancel()
-        tts?.setOnUtteranceProgressListener(null)
-        tts?.stop()
+        ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
-        savedChunks = emptyList()
         savedTopicName = ""
-        currentChunkIndex = 0
         lastLocation?.let { startGenerationCycle(it) }
-    }
-
-    private fun splitIntoChunks(text: String, maxLength: Int = 3800): List<String> {
-        if (text.length <= maxLength) return listOf(text)
-        val chunks = mutableListOf<String>()
-        var start = 0
-        while (start < text.length) {
-            val end = minOf(start + maxLength, text.length)
-            val splitAt = if (end < text.length) {
-                text.lastIndexOf(". ", end).takeIf { it > start } ?: end
-            } else end
-            chunks.add(text.substring(start, splitAt).trim())
-            start = splitAt
-        }
-        return chunks.filter { it.isNotBlank() }
     }
 
     private fun stopTour() {
         currentNarrationPoi = null
         generationJob?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
-        tts?.stop()
+        ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
-        savedChunks = emptyList()
+        savedTopicName = ""
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun initTts() {
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-                tts?.setSpeechRate(sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f))
-                ttsReady = true
+    private fun initTtsEngine() {
+        ttsEngine?.shutdown()
+        val provider = sharedPrefs.getString(PREF_TTS_PROVIDER, "android") ?: "android"
+        ttsEngine = when (provider) {
+            "openai" -> {
+                val key = sharedPrefs.getString(PREF_OPENAI_TTS_KEY, "") ?: ""
+                val model = sharedPrefs.getString(PREF_OPENAI_TTS_MODEL, "tts-1-hd") ?: "tts-1-hd"
+                OpenAiTtsEngine(this, lifecycleScope, key, model)
             }
+            "elevenlabs" -> {
+                val key = sharedPrefs.getString(PREF_ELEVENLABS_KEY, "") ?: ""
+                val voiceId = sharedPrefs.getString(PREF_ELEVENLABS_VOICE, ElevenLabsTtsEngine.DEFAULT_VOICE_ID)
+                    ?: ElevenLabsTtsEngine.DEFAULT_VOICE_ID
+                ElevenLabsTtsEngine(this, lifecycleScope, key, voiceId)
+            }
+            else -> AndroidTtsEngine(this)
         }
     }
 
-    private val sharedPrefs by lazy {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-    }
+    private val sharedPrefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
@@ -341,9 +274,7 @@ class TourGuideService : LifecycleService() {
 
     private fun buildNotification(text: String): Notification {
         val tapIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Travel Guide Active")
@@ -365,7 +296,7 @@ class TourGuideService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        tts?.shutdown()
+        ttsEngine?.shutdown()
         fusedLocation.removeLocationUpdates(locationCallback)
     }
 
@@ -379,9 +310,13 @@ class TourGuideService : LifecycleService() {
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val CHANNEL_ID = "tour_guide_channel"
         const val NOTIFICATION_ID = 1001
-        const val LAST_UTTERANCE_ID = "last_utterance"
         const val PREFS_NAME = "tour_prefs"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
+        const val PREF_TTS_PROVIDER = "pref_tts_provider"
+        const val PREF_OPENAI_TTS_KEY = "pref_openai_tts_key"
+        const val PREF_OPENAI_TTS_MODEL = "pref_openai_tts_model"
+        const val PREF_ELEVENLABS_KEY = "pref_elevenlabs_key"
+        const val PREF_ELEVENLABS_VOICE = "pref_elevenlabs_voice"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)
