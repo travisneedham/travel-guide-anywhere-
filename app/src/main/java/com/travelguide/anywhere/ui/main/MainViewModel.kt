@@ -73,6 +73,14 @@ class MainViewModel @Inject constructor(
         getApplication<Application>().startService(intent)
     }
 
+    fun setPlaybackSpeed(rate: Float) {
+        val intent = Intent(getApplication(), TourGuideService::class.java).apply {
+            action = TourGuideService.ACTION_SET_SPEED
+            putExtra(TourGuideService.EXTRA_SPEECH_RATE, rate)
+        }
+        getApplication<Application>().startService(intent)
+    }
+
     fun clearHistory() {
         viewModelScope.launch {
             mentionedPlacesStore.clear()

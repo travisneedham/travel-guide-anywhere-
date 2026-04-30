@@ -82,6 +82,7 @@ class TourGuideService : LifecycleService() {
             ACTION_PAUSE -> pauseTour()
             ACTION_RESUME -> resumeTour()
             ACTION_SKIP -> skipCurrent()
+            ACTION_SET_SPEED -> ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 0.95f))
         }
 
         return START_STICKY
@@ -321,6 +322,8 @@ class TourGuideService : LifecycleService() {
         const val PREF_OPENAI_TTS_MODEL = "pref_openai_tts_model"
         const val PREF_ELEVENLABS_KEY = "pref_elevenlabs_key"
         const val PREF_ELEVENLABS_VOICE = "pref_elevenlabs_voice"
+        const val ACTION_SET_SPEED = "ACTION_SET_SPEED"
+        const val EXTRA_SPEECH_RATE = "EXTRA_SPEECH_RATE"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)

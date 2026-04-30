@@ -43,6 +43,9 @@ class MainFragment : Fragment() {
     private val binding get() = _binding!!
     private val viewModel: MainViewModel by viewModels()
 
+    private var sliderInSpeedMode = false
+    private var savedRangeSliderValue = 4f
+
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var okHttpClient: OkHttpClient
 
@@ -61,13 +64,55 @@ class MainFragment : Fragment() {
     }
 
     private fun setupSlider() {
-        binding.rangeSlider.value = 4f
-        binding.tvRangeLabel.text = getString(R.string.range_label, "1.0")
-        binding.rangeSlider.addOnChangeListener { _, value, _ ->
-            val miles = value / 4f
-            val formatted = if (miles < 1f) "%.2f".format(miles) else "%.1f".format(miles)
-            binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
+        binding.rangeSlider.value = savedRangeSliderValue
+        updateRangeLabel(savedRangeSliderValue)
+        binding.rangeSlider.addOnChangeListener { _, value, fromUser ->
+            if (sliderInSpeedMode) {
+                updateSpeedLabel(value)
+                if (fromUser) {
+                    prefs.edit().putFloat(PREF_SPEECH_RATE, value).apply()
+                    viewModel.setPlaybackSpeed(value)
+                }
+            } else {
+                updateRangeLabel(value)
+            }
         }
+    }
+
+    private fun switchSliderToSpeedMode() {
+        if (sliderInSpeedMode) return
+        savedRangeSliderValue = binding.rangeSlider.value
+        sliderInSpeedMode = true
+        val rate = prefs.getFloat(PREF_SPEECH_RATE, 0.95f).coerceIn(0.5f, 1.5f)
+        binding.rangeSlider.apply {
+            valueFrom = 0.5f
+            valueTo = 1.5f
+            stepSize = 0.05f
+            value = rate
+        }
+        updateSpeedLabel(rate)
+    }
+
+    private fun switchSliderToRangeMode() {
+        if (!sliderInSpeedMode) return
+        sliderInSpeedMode = false
+        binding.rangeSlider.apply {
+            valueFrom = 1f
+            valueTo = 40f
+            stepSize = 1f
+            value = savedRangeSliderValue
+        }
+        updateRangeLabel(savedRangeSliderValue)
+    }
+
+    private fun updateRangeLabel(value: Float) {
+        val miles = value / 4f
+        val formatted = if (miles < 1f) "%.2f".format(miles) else "%.1f".format(miles)
+        binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
+    }
+
+    private fun updateSpeedLabel(rate: Float) {
+        binding.tvRangeLabel.text = getString(R.string.speed_label, "%.2f".format(rate))
     }
 
     private fun setupButtons() {
@@ -107,9 +152,9 @@ class MainFragment : Fragment() {
         val isActive = state != TourState.IDLE && state != TourState.ERROR
         binding.btnGo.visibility = if (isActive) View.GONE else View.VISIBLE
         binding.btnStop.visibility = if (isActive) View.VISIBLE else View.GONE
-        binding.rangeSlider.isEnabled = !isActive
         binding.cardStatus.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
+        if (isActive) switchSliderToSpeedMode() else switchSliderToRangeMode()
 
         val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
         binding.layoutPlaybackControls.visibility = if (showControls) View.VISIBLE else View.GONE

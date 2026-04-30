@@ -74,6 +74,14 @@ class OpenAiTtsEngine(
         }
     }
 
+    override fun setSpeed(rate: Float) {
+        try {
+            mediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(rate.coerceAtLeast(0.1f))
+        } catch (e: Exception) {
+            Log.w(TAG, "setSpeed failed: ${e.message}")
+        }
+    }
+
     override fun pause() {
         mediaPlayer?.pause()
         isPaused = true

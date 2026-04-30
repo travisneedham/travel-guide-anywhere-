@@ -3,6 +3,7 @@
     <string name="app_name">Travel Guide</string>
     <string name="app_subtitle">AI-powered audio tour guide</string>
     <string name="range_label">Searching within %1$s miles</string>
+    <string name="speed_label">Narration speed: %1$s×</string>
     <string name="btn_go">Start Tour</string>
     <string name="btn_stop">Stop Tour</string>
     <string name="status_locating">Getting your location…</string>

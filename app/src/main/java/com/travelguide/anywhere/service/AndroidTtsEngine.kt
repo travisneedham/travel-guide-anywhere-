@@ -44,6 +44,11 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         enqueueChunks(chunks, startIndex = 0)
     }
 
+    override fun setSpeed(rate: Float) {
+        savedSpeechRate = rate
+        tts?.setSpeechRate(rate)
+    }
+
     override fun pause() {
         tts?.setOnUtteranceProgressListener(null)
         tts?.stop()

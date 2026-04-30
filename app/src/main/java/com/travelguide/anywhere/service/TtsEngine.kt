@@ -6,6 +6,7 @@ interface TtsEngine {
     val canResume: Boolean
 
     fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit)
+    fun setSpeed(rate: Float)
     fun pause()
     fun resume()
     fun stop()
