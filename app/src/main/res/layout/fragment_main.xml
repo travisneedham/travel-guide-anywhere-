@@ -182,9 +182,12 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:layout_marginEnd="8dp"
+                        android:maxLines="1"
                         android:text="@string/btn_pause"
                         app:icon="@drawable/ic_pause"
-                        app:iconGravity="textStart" />
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp"
+                        app:iconPadding="6dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_skip"

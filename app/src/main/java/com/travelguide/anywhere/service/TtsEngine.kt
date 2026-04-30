@@ -5,7 +5,7 @@ interface TtsEngine {
     /** True when there is paused content that can be resumed. */
     val canResume: Boolean
 
-    fun speak(text: String, speechRate: Float, onDone: () -> Unit, onError: () -> Unit)
+    fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit)
     fun pause()
     fun resume()
     fun stop()

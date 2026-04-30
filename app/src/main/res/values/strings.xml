@@ -8,6 +8,7 @@
     <string name="status_locating">Getting your location…</string>
     <string name="status_fetching">Finding nearby places…</string>
     <string name="status_generating">Writing your narration…</string>
+    <string name="status_loading_audio">Loading audio…</string>
     <string name="status_speaking">Speaking</string>
     <string name="status_paused">Paused</string>
     <string name="btn_pause">Pause</string>

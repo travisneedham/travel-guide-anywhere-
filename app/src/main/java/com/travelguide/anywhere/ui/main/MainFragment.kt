@@ -127,6 +127,7 @@ class MainFragment : Fragment() {
             TourState.LOCATING -> getString(R.string.status_locating)
             TourState.FETCHING -> getString(R.string.status_fetching)
             TourState.GENERATING -> getString(R.string.status_generating)
+            TourState.LOADING_AUDIO -> getString(R.string.status_loading_audio)
             TourState.SPEAKING -> getString(R.string.status_speaking)
             TourState.PAUSED -> getString(R.string.status_paused)
             TourState.NO_NEW_POIS -> getString(R.string.status_no_new_pois)
@@ -134,7 +135,8 @@ class MainFragment : Fragment() {
         }
 
         binding.progressIndicator.visibility = when (state) {
-            TourState.FETCHING, TourState.GENERATING, TourState.LOCATING -> View.VISIBLE
+            TourState.LOCATING, TourState.FETCHING, TourState.GENERATING,
+            TourState.LOADING_AUDIO, TourState.NO_NEW_POIS -> View.VISIBLE
             else -> View.GONE
         }
     }

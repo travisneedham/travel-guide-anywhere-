@@ -162,13 +162,17 @@ class TourGuideService : LifecycleService() {
         savedTopicName = topicName
         speakStartTime = System.currentTimeMillis()
         isSpeaking = true
-        emitState(TourState.SPEAKING)
+        emitState(TourState.LOADING_AUDIO)
         emitCurrentTopic(topicName)
-        updateNotification("Now: $topicName")
+        updateNotification("Loading audio: $topicName")
 
         engine.speak(
             text = text,
             speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f),
+            onStart = {
+                emitState(TourState.SPEAKING)
+                updateNotification("Now: $topicName")
+            },
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
                 val poi = currentNarrationPoi
@@ -333,5 +337,5 @@ class TourGuideService : LifecycleService() {
 }
 
 enum class TourState {
-    IDLE, LOCATING, FETCHING, GENERATING, SPEAKING, PAUSED, NO_NEW_POIS, ERROR
+    IDLE, LOCATING, FETCHING, GENERATING, LOADING_AUDIO, SPEAKING, PAUSED, NO_NEW_POIS, ERROR
 }

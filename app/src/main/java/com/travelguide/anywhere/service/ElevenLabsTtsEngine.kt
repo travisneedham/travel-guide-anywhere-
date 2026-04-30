@@ -38,7 +38,7 @@ class ElevenLabsTtsEngine(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    override fun speak(text: String, speechRate: Float, onDone: () -> Unit, onError: () -> Unit) {
+    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit) {
         stop()
         speakJob = scope.launch {
             try {
@@ -63,6 +63,7 @@ class ElevenLabsTtsEngine(
                             true
                         }
                         prepare()
+                        onStart()
                         start()
                     }
                 }

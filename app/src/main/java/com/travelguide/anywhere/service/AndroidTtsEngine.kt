@@ -15,6 +15,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
     private var savedChunks: List<String> = emptyList()
     private var currentChunkIndex = 0
     private var savedSpeechRate = 0.95f
+    private var onStartCallback: (() -> Unit)? = null
     private var onDoneCallback: (() -> Unit)? = null
     private var onErrorCallback: (() -> Unit)? = null
 
@@ -29,11 +30,12 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         }
     }
 
-    override fun speak(text: String, speechRate: Float, onDone: () -> Unit, onError: () -> Unit) {
+    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit) {
         val chunks = splitIntoChunks(text)
         savedChunks = chunks
         currentChunkIndex = 0
         savedSpeechRate = speechRate
+        onStartCallback = onStart
         onDoneCallback = onDone
         onErrorCallback = onError
 
@@ -65,6 +67,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         tts?.stop()
         savedChunks = emptyList()
         currentChunkIndex = 0
+        onStartCallback = null
         onDoneCallback = null
         onErrorCallback = null
     }
@@ -76,6 +79,8 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
 
     private fun buildListener() = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {
+            onStartCallback?.invoke()
+            onStartCallback = null
             utteranceId?.removePrefix("chunk_")?.toIntOrNull()?.let { currentChunkIndex = it }
         }
         override fun onDone(utteranceId: String?) {
