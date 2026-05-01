@@ -10,3 +10,5 @@ captures/
 *.apk
 *.aab
 *.jks
+# Downloaded native libraries — auto-fetched by build.gradle.kts on first build
+app/libs/*.aar

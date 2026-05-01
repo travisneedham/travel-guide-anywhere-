@@ -21,8 +21,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.6.1"
+        versionCode = 18
+        versionName = "1.6.2"
 
         buildConfigField(
             "String",
@@ -62,6 +62,23 @@ android {
     }
 }
 
+// Auto-download sherpa-onnx AAR from GitHub releases on first build (~54 MB, one-time)
+run {
+    val aarFile = file("${projectDir}/libs/sherpa-onnx-1.13.0.aar")
+    if (!aarFile.exists()) {
+        aarFile.parentFile.mkdirs()
+        println("Downloading sherpa-onnx-1.13.0.aar (~54 MB)…")
+        try {
+            java.net.URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.0/sherpa-onnx-1.13.0.aar")
+                .openStream()
+                .use { input -> aarFile.outputStream().use { input.copyTo(it) } }
+            println("sherpa-onnx download complete.")
+        } catch (e: Exception) {
+            logger.warn("Failed to download sherpa-onnx AAR: ${e.message}. Build may fail for Kokoro TTS.")
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -91,8 +108,8 @@ dependencies {
     // Location
     implementation(libs.play.services.location)
 
-    // Sherpa-ONNX (on-device Kokoro TTS)
-    implementation(libs.sherpa.onnx)
+    // Sherpa-ONNX (on-device Kokoro TTS) — AAR auto-downloaded by the run{} block above
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 
     // Commons Compress (tar.bz2 extraction for Kokoro model download)
     implementation(libs.commons.compress)
