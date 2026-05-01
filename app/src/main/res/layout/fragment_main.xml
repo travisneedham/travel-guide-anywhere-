@@ -134,11 +134,13 @@
 
                     <com.google.android.material.progressindicator.CircularProgressIndicator
                         android:id="@+id/progress_indicator"
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_marginEnd="12dp"
+                        android:indeterminate="true"
                         android:visibility="gone"
                         app:indicatorColor="@color/accent"
+                        app:indicatorSize="20dp"
                         app:trackThickness="2dp"
                         tools:visibility="visible" />
 
