@@ -1,3 +1,4 @@
+import java.net.URL
 import java.util.Properties
 
 plugins {
@@ -21,8 +22,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.6.2"
+        versionCode = 19
+        versionName = "1.6.3"
 
         buildConfigField(
             "String",
@@ -69,9 +70,9 @@ run {
         aarFile.parentFile.mkdirs()
         println("Downloading sherpa-onnx-1.13.0.aar (~54 MB)…")
         try {
-            java.net.URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.0/sherpa-onnx-1.13.0.aar")
+            URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.0/sherpa-onnx-1.13.0.aar")
                 .openStream()
-                .use { input -> aarFile.outputStream().use { input.copyTo(it) } }
+                .use { input: java.io.InputStream -> aarFile.outputStream().use { input.copyTo(it) } }
             println("sherpa-onnx download complete.")
         } catch (e: Exception) {
             logger.warn("Failed to download sherpa-onnx AAR: ${e.message}. Build may fail for Kokoro TTS.")
