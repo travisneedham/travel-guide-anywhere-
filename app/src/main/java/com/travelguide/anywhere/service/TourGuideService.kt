@@ -38,6 +38,7 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var poiRepository: PoiRepository
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
+    @Inject lateinit var kokoroModelManager: KokoroModelManager
 
     private var ttsEngine: TtsEngine? = null
     private var radiusMiles = 1f
@@ -263,6 +264,14 @@ class TourGuideService : LifecycleService() {
                 val voiceId = sharedPrefs.getString(PREF_ELEVENLABS_VOICE, ElevenLabsTtsEngine.DEFAULT_VOICE_ID)
                     ?: ElevenLabsTtsEngine.DEFAULT_VOICE_ID
                 ElevenLabsTtsEngine(this, lifecycleScope, key, voiceId)
+            }
+            "kokoro" -> {
+                if (kokoroModelManager.isReady) {
+                    KokoroTtsEngine(this, lifecycleScope, kokoroModelManager.modelDir)
+                } else {
+                    Log.w(TAG, "Kokoro model not downloaded — falling back to Android TTS")
+                    AndroidTtsEngine(this)
+                }
             }
             else -> AndroidTtsEngine(this)
         }

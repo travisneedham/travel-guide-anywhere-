@@ -21,8 +21,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.5.9"
+        versionCode = 16
+        versionName = "1.6.0"
 
         buildConfigField(
             "String",
@@ -54,6 +54,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
 }
 
 dependencies {
@@ -84,4 +90,10 @@ dependencies {
 
     // Location
     implementation(libs.play.services.location)
+
+    // Sherpa-ONNX (on-device Kokoro TTS)
+    implementation(libs.sherpa.onnx)
+
+    // Commons Compress (tar.bz2 extraction for Kokoro model download)
+    implementation(libs.commons.compress)
 }

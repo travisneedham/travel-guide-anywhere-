@@ -22,6 +22,7 @@ import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.databinding.FragmentMainBinding
+import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
@@ -48,6 +49,7 @@ class MainFragment : Fragment() {
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var okHttpClient: OkHttpClient
+    @Inject lateinit var kokoroModelManager: KokoroModelManager
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -252,9 +254,11 @@ class MainFragment : Fragment() {
         val rbAndroid = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_android)
         val rbOpenAi = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_openai)
         val rbElevenLabs = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_elevenlabs)
+        val rbKokoro = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_kokoro)
         when (prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android")) {
             "openai" -> rbOpenAi.isChecked = true
             "elevenlabs" -> rbElevenLabs.isChecked = true
+            "kokoro" -> rbKokoro.isChecked = true
             else -> rbAndroid.isChecked = true
         }
 
@@ -297,6 +301,53 @@ class MainFragment : Fragment() {
             }
         }
 
+        // ── Kokoro download section ───────────────────────────────
+        val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
+        val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
+        val btnKokoroDownload = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_kokoro_download)
+
+        fun applyKokoroState(state: KokoroModelManager.DownloadState) {
+            when (state) {
+                is KokoroModelManager.DownloadState.NotDownloaded -> {
+                    tvKokoroStatus.text = "Not downloaded"
+                    progressKokoro.visibility = View.GONE
+                    btnKokoroDownload.visibility = View.VISIBLE
+                    btnKokoroDownload.text = "Download model (~315 MB)"
+                    btnKokoroDownload.isEnabled = true
+                }
+                is KokoroModelManager.DownloadState.Downloading -> {
+                    val pct = (state.progress * 100).toInt()
+                    tvKokoroStatus.text = "Downloading… $pct%"
+                    progressKokoro.visibility = View.VISIBLE
+                    progressKokoro.progress = pct
+                    btnKokoroDownload.visibility = View.GONE
+                }
+                is KokoroModelManager.DownloadState.Ready -> {
+                    tvKokoroStatus.text = "Ready"
+                    progressKokoro.visibility = View.GONE
+                    btnKokoroDownload.visibility = View.GONE
+                }
+                is KokoroModelManager.DownloadState.Error -> {
+                    tvKokoroStatus.text = "Error: ${state.message}"
+                    progressKokoro.visibility = View.GONE
+                    btnKokoroDownload.visibility = View.VISIBLE
+                    btnKokoroDownload.text = "Retry download"
+                    btnKokoroDownload.isEnabled = true
+                }
+            }
+        }
+
+        applyKokoroState(kokoroModelManager.state.value)
+
+        btnKokoroDownload.setOnClickListener {
+            btnKokoroDownload.isEnabled = false
+            kokoroModelManager.downloadIfNeeded(lifecycleScope)
+        }
+
+        val kokoroStateJob = lifecycleScope.launch {
+            kokoroModelManager.state.collect { applyKokoroState(it) }
+        }
+
         // ── Build dialog ──────────────────────────────────────────
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.settings_title))
@@ -307,6 +358,7 @@ class MainFragment : Fragment() {
                 val provider = when (rgProvider.checkedRadioButtonId) {
                     R.id.rb_openai -> "openai"
                     R.id.rb_elevenlabs -> "elevenlabs"
+                    R.id.rb_kokoro -> "kokoro"
                     else -> "android"
                 }
                 val openAiKey = openAiKeyInput.text?.toString()?.trim() ?: ""
@@ -328,6 +380,7 @@ class MainFragment : Fragment() {
                 Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
+            .setOnDismissListener { kokoroStateJob.cancel() }
             .show()
     }
 

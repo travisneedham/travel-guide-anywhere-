@@ -11,6 +11,8 @@ activity = "1.9.3"
 fragment = "1.8.5"
 material = "1.12.0"
 playServicesLocation = "21.3.0"
+sherpaOnnx = "1.12.40"
+commonsCompress = "1.27.1"
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
 constraintlayout = "2.2.0"
@@ -48,6 +50,12 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 
 # Location
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+
+# Sherpa-ONNX (on-device TTS via Kokoro)
+sherpa-onnx = { group = "com.k2fsa.sherpa.onnx", name = "sherpa-onnx-android", version.ref = "sherpaOnnx" }
+
+# Commons Compress (tar.bz2 extraction for model download)
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
