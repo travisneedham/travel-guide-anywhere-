@@ -7,11 +7,12 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -80,30 +81,36 @@ class KokoroTtsEngine(
 
         speakJob = engineScope.launch {
             var onStartCalled = false
-            for ((idx, chunk) in chunks.withIndex()) {
-                if (!isActive) return@launch
+
+            // Kick off generation of chunk 0 immediately so the loop can
+            // start the NEXT chunk's generation while this chunk is playing.
+            var pendingGen: Deferred<File?> = async(Dispatchers.Default) {
+                generateWav(engine, chunks[0], speechRate)
+            }
+
+            for (idx in chunks.indices) {
+                if (!isActive) { pendingGen.cancel(); return@launch }
                 val isLast = idx == chunks.lastIndex
 
-                // Generate audio for this chunk on the CPU-bound dispatcher.
-                val wavFile = File(context.cacheDir, "kokoro_${UUID.randomUUID()}.wav")
-                try {
-                    withContext(Dispatchers.Default) {
-                        engine.generate(text = chunk, sid = voiceSid, speed = speechRate)
-                            .save(wavFile.absolutePath)
-                    }
-                } catch (e: CancellationException) {
-                    wavFile.delete()
-                    throw e
-                } catch (e: Exception) {
-                    Log.e(TAG, "Kokoro generate error on chunk $idx: ${e.message}")
-                    wavFile.delete()
+                // Wait for the already-started generation to finish.
+                val wavFile = pendingGen.await() ?: run {
                     withContext(Dispatchers.Main) { onError() }
                     return@launch
                 }
 
-                if (!isActive) { wavFile.delete(); return@launch }
+                // Pre-generate the next chunk in the background while this one plays.
+                if (!isLast) {
+                    pendingGen = async(Dispatchers.Default) {
+                        generateWav(engine, chunks[idx + 1], speechRate)
+                    }
+                }
 
-                // Play the chunk and suspend until it finishes.
+                if (!isActive) {
+                    wavFile.delete()
+                    if (!isLast) pendingGen.cancel()
+                    return@launch
+                }
+
                 val ok = withContext(Dispatchers.Main) {
                     suspendCancellableCoroutine { cont ->
                         val mp = MediaPlayer()
@@ -144,6 +151,7 @@ class KokoroTtsEngine(
                 }
 
                 if (!ok) {
+                    if (!isLast) pendingGen.cancel()
                     withContext(Dispatchers.Main) { onError() }
                     return@launch
                 }
@@ -153,9 +161,23 @@ class KokoroTtsEngine(
         }
     }
 
+    // Generates a single chunk to a temp WAV file. Returns null on error.
+    private fun generateWav(engine: OfflineTts, chunk: String, speechRate: Float): File? {
+        val wavFile = File(context.cacheDir, "kokoro_${UUID.randomUUID()}.wav")
+        return try {
+            engine.generate(text = chunk, sid = voiceSid, speed = speechRate)
+                .save(wavFile.absolutePath)
+            wavFile
+        } catch (e: Exception) {
+            Log.e(TAG, "Kokoro generate error: ${e.message}")
+            wavFile.delete()
+            null
+        }
+    }
+
     // Split narration into sentence-grouped chunks of ≤ MAX_CHUNK_CHARS.
-    // Each chunk generates in ~20–25 s on device; audio plays for ~30 s,
-    // so playback stays ahead of generation for the full narration.
+    // Generation of chunk N+1 runs in parallel with playback of chunk N,
+    // so transitions are gapless as long as generation ≤ playback duration.
     private fun splitIntoChunks(text: String): List<String> {
         val sentences = text.split(Regex("(?<=[.!?])\\s+"))
             .map { it.trim() }.filter { it.isNotEmpty() }
