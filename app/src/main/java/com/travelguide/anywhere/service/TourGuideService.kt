@@ -29,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import com.travelguide.anywhere.ui.main.MainFragment
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -266,7 +267,8 @@ class TourGuideService : LifecycleService() {
             }
             "kokoro" -> {
                 if (kokoroModelManager.isReady) {
-                    KokoroTtsEngine(this, kokoroModelManager.modelDir)
+                    val sid = sharedPrefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, 0)
+                    KokoroTtsEngine(this, kokoroModelManager.modelDir, voiceSid = sid)
                 } else {
                     Log.w(TAG, "Kokoro model not downloaded — falling back to Android TTS")
                     AndroidTtsEngine(this)

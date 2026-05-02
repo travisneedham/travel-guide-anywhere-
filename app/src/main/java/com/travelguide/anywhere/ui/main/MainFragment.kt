@@ -308,6 +308,20 @@ class MainFragment : Fragment() {
                 Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
             }
 
+        // ── Kokoro voice picker ───────────────────────────────────
+        val tilKokoroVoice = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.til_kokoro_voice)
+        val actvKokoroVoice = dialogView.findViewById<AutoCompleteTextView>(R.id.actv_kokoro_voice)
+        val kokoroVoiceAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, KOKORO_VOICES.map { it.first })
+        actvKokoroVoice.setAdapter(kokoroVoiceAdapter)
+        val savedVoiceSid = prefs.getInt(PREF_KOKORO_VOICE_SID, 0)
+        actvKokoroVoice.setText(KOKORO_VOICES.getOrElse(savedVoiceSid) { KOKORO_VOICES[0] }.first, false)
+
+        fun updateKokoroVoiceVisibility() {
+            tilKokoroVoice.visibility = if (rbKokoro.isChecked && kokoroModelManager.isReady) View.VISIBLE else View.GONE
+        }
+        updateKokoroVoiceVisibility()
+        rgProvider.setOnCheckedChangeListener { _, _ -> updateKokoroVoiceVisibility() }
+
         // ── Kokoro download section ───────────────────────────────
         val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
         val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
@@ -340,6 +354,7 @@ class MainFragment : Fragment() {
                     tvKokoroStatus.text = "Ready"
                     progressKokoro.visibility = View.GONE
                     btnKokoroDownload.visibility = View.GONE
+                    updateKokoroVoiceVisibility()
                 }
                 is KokoroModelManager.DownloadState.Error -> {
                     tvKokoroStatus.text = "Error: ${state.message}"
@@ -379,6 +394,10 @@ class MainFragment : Fragment() {
                 val openAiModel = if (actvModel.text.toString().startsWith("tts-1-hd")) "tts-1-hd" else "tts-1"
                 val elKey = elevenLabsKeyInput.text?.toString()?.trim() ?: ""
 
+                val kokoroVoiceSid = KOKORO_VOICES.indexOfFirst {
+                    it.first == actvKokoroVoice.text.toString()
+                }.coerceAtLeast(0)
+
                 prefs.edit()
                     .putString(PREF_API_KEY, anthropicKey)
                     .putFloat(PREF_SPEECH_RATE, rate)
@@ -386,6 +405,7 @@ class MainFragment : Fragment() {
                     .putString(TourGuideService.PREF_OPENAI_TTS_KEY, openAiKey)
                     .putString(TourGuideService.PREF_OPENAI_TTS_MODEL, openAiModel)
                     .putString(TourGuideService.PREF_ELEVENLABS_KEY, elKey)
+                    .putInt(PREF_KOKORO_VOICE_SID, kokoroVoiceSid)
                     .apply()
                 Toast.makeText(requireContext(), "Settings saved", Toast.LENGTH_SHORT).show()
             }
@@ -445,5 +465,20 @@ class MainFragment : Fragment() {
     companion object {
         const val PREF_API_KEY = "pref_api_key"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
+        const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
+
+        val KOKORO_VOICES = listOf(
+            "af — American female (default)" to 0,
+            "af_bella — American female" to 1,
+            "af_nicole — American female" to 2,
+            "af_sarah — American female" to 3,
+            "af_sky — American female" to 4,
+            "am_adam — American male" to 5,
+            "am_michael — American male" to 6,
+            "bf_emma — British female" to 7,
+            "bf_isabella — British female" to 8,
+            "bm_george — British male" to 9,
+            "bm_lewis — British male" to 10,
+        )
     }
 }

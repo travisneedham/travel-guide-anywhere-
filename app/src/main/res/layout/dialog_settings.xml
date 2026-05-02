@@ -286,6 +286,24 @@
             android:text="Download model (~315 MB)"
             android:visibility="gone" />
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_kokoro_voice"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Voice"
+            android:visibility="gone">
+
+            <AutoCompleteTextView
+                android:id="@+id/actv_kokoro_voice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none"
+                android:focusable="false" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_clear_history"
             style="@style/Widget.Material3.Button.TextButton"
