@@ -319,7 +319,14 @@ class MainFragment : Fragment() {
                     val pct = (state.progress * 100).toInt()
                     tvKokoroStatus.text = "Downloading… $pct%"
                     progressKokoro.visibility = View.VISIBLE
+                    progressKokoro.isIndeterminate = false
                     progressKokoro.progress = pct
+                    btnKokoroDownload.visibility = View.GONE
+                }
+                is KokoroModelManager.DownloadState.Extracting -> {
+                    tvKokoroStatus.text = "Extracting files… (2–3 min)"
+                    progressKokoro.visibility = View.VISIBLE
+                    progressKokoro.isIndeterminate = true
                     btnKokoroDownload.visibility = View.GONE
                 }
                 is KokoroModelManager.DownloadState.Ready -> {

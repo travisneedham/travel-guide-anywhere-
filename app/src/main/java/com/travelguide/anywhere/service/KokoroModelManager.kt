@@ -33,6 +33,7 @@ class KokoroModelManager @Inject constructor(
     sealed class DownloadState {
         object NotDownloaded : DownloadState()
         data class Downloading(val progress: Float) : DownloadState()
+        object Extracting : DownloadState()
         object Ready : DownloadState()
         data class Error(val message: String) : DownloadState()
     }
@@ -89,7 +90,7 @@ class KokoroModelManager @Inject constructor(
                 }
             }
 
-            _state.value = DownloadState.Downloading(0.99f)
+            _state.value = DownloadState.Extracting
             extractTarBz2(tempFile, context.filesDir)
             tempFile.delete()
             Log.i(TAG, "Kokoro model ready at ${modelDir.absolutePath}")
