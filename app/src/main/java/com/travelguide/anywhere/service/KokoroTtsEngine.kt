@@ -25,6 +25,7 @@ class KokoroTtsEngine(
     private val context: Context,
     private val modelDir: File,
     val voiceSid: Int = DEFAULT_VOICE_ID,
+    private val lang: String = "en-us",
 ) : TtsEngine {
 
     // Private scope so shutdown() cancels both the init job and any speak job.
@@ -50,6 +51,7 @@ class KokoroTtsEngine(
                             voices = File(modelDir, "voices.bin").absolutePath,
                             tokens = File(modelDir, "tokens.txt").absolutePath,
                             dataDir = File(modelDir, "espeak-ng-data").absolutePath,
+                            lang = lang,
                         ),
                         numThreads = 2,
                         debug = false,
