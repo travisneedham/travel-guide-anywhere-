@@ -15,14 +15,21 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class KokoroModelManager @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val okHttpClient: OkHttpClient
+    @ApplicationContext private val context: Context
 ) {
+    // Dedicated client with no body-logging interceptor — the shared app client buffers
+    // the entire response for logging which OOMs on a 305 MB download.
+    private val downloadClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.MINUTES)
+        .build()
+
     sealed class DownloadState {
         object NotDownloaded : DownloadState()
         data class Downloading(val progress: Float) : DownloadState()
@@ -56,7 +63,7 @@ class KokoroModelManager @Inject constructor(
         val tempFile = File(context.cacheDir, "kokoro-model.tar.bz2")
         try {
             val request = Request.Builder().url(MODEL_URL).build()
-            okHttpClient.newCall(request).execute().use { response ->
+            downloadClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
                 val body = response.body ?: throw IOException("Empty response")
                 val totalBytes = body.contentLength()
