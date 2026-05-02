@@ -289,14 +289,7 @@ class MainFragment : Fragment() {
         val storedOpenAiKey = prefs.getString(TourGuideService.PREF_OPENAI_TTS_KEY, "") ?: ""
         val storedElKey = prefs.getString(TourGuideService.PREF_ELEVENLABS_KEY, "") ?: ""
 
-        if (storedOpenAiKey.isBlank()) {
-            tvOpenAiBalance.text = "No key saved"
-        } else {
-            tvOpenAiBalance.text = "Loading…"
-            lifecycleScope.launch {
-                tvOpenAiBalance.text = fetchOpenAiBalance(storedOpenAiKey)
-            }
-        }
+        tvOpenAiBalance.text = if (storedOpenAiKey.isBlank()) "No key saved" else "See platform.openai.com"
         if (storedElKey.isBlank()) {
             tvElevenLabsBalance.text = "No key saved"
         } else {
@@ -449,26 +442,6 @@ class MainFragment : Fragment() {
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { kokoroStateJob.cancel() }
             .show()
-    }
-
-    private suspend fun fetchOpenAiBalance(apiKey: String): String = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url("https://api.openai.com/v1/dashboard/billing/credit_grants")
-                .header("Authorization", "Bearer $apiKey")
-                .get()
-                .build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext "Balance unavailable"
-                val body = response.body?.string() ?: return@withContext "Balance unavailable"
-                val json = JSONObject(body)
-                val available = json.optDouble("total_available", -1.0)
-                if (available >= 0) "\$${"%.2f".format(available)} remaining"
-                else "Balance unavailable"
-            }
-        } catch (e: Exception) {
-            "Balance unavailable"
-        }
     }
 
     private suspend fun fetchElevenLabsBalance(apiKey: String): String = withContext(Dispatchers.IO) {
