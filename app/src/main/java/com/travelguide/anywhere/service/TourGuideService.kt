@@ -268,6 +268,7 @@ class TourGuideService : LifecycleService() {
             "kokoro" -> {
                 if (kokoroModelManager.isReady) {
                     val sid = sharedPrefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, 0)
+                        .coerceIn(0, MainFragment.KOKORO_VOICES.size - 1)
                     KokoroTtsEngine(this, kokoroModelManager.modelDir, voiceSid = sid)
                 } else {
                     Log.w(TAG, "Kokoro model not downloaded — falling back to Android TTS")

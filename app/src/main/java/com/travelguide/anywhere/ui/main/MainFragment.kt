@@ -477,8 +477,6 @@ class MainFragment : Fragment() {
             "am_michael — American male" to 6,
             "bf_emma — British female" to 7,
             "bf_isabella — British female" to 8,
-            "bm_george — British male" to 9,
-            "bm_lewis — British male" to 10,
         )
     }
 }
