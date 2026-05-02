@@ -1,5 +1,8 @@
 package com.travelguide.anywhere.ui.main
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -10,6 +13,7 @@ import android.widget.AutoCompleteTextView
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -32,6 +36,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -377,6 +382,38 @@ class MainFragment : Fragment() {
             kokoroModelManager.state.collect { applyKokoroState(it) }
         }
 
+        // ── Diagnostics buttons ───────────────────────────────────
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_copy_logs)
+            .setOnClickListener {
+                lifecycleScope.launch {
+                    val logs = readLogcat(maxLines = 30)
+                    val cm = requireContext().getSystemService(ClipboardManager::class.java)
+                    cm.setPrimaryClip(ClipData.newPlainText("travel_guide_logs", logs))
+                    Toast.makeText(requireContext(), "Last 30 lines copied to clipboard", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_export_logs)
+            .setOnClickListener {
+                lifecycleScope.launch {
+                    val logs = readLogcat(maxLines = null)
+                    val logFile = File(requireContext().cacheDir, "travel_guide_log.txt")
+                    logFile.writeText(logs)
+                    val uri = FileProvider.getUriForFile(
+                        requireContext(),
+                        "${requireContext().packageName}.fileprovider",
+                        logFile
+                    )
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Log")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Export Log File"))
+                }
+            }
+
         // ── Build dialog ──────────────────────────────────────────
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.settings_title))
@@ -454,6 +491,21 @@ class MainFragment : Fragment() {
             }
         } catch (e: Exception) {
             "Balance unavailable"
+        }
+    }
+
+    private suspend fun readLogcat(maxLines: Int?): String = withContext(Dispatchers.IO) {
+        val pid = android.os.Process.myPid().toString()
+        val args = if (maxLines != null) {
+            arrayOf("logcat", "-d", "-t", maxLines.toString(), "--pid", pid)
+        } else {
+            arrayOf("logcat", "-d", "--pid", pid)
+        }
+        try {
+            val process = Runtime.getRuntime().exec(args)
+            process.inputStream.bufferedReader().readText().ifBlank { "(no log output found)" }
+        } catch (e: Exception) {
+            "Error reading logcat: ${e.message}"
         }
     }
 
