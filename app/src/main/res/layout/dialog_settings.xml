@@ -286,5 +286,15 @@
             android:text="Download model (~315 MB)"
             android:visibility="gone" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_history"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="8dp"
+            android:text="Clear History"
+            android:textColor="@color/stop_color" />
+
     </LinearLayout>
 </ScrollView>

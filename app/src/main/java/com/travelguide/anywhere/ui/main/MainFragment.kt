@@ -301,6 +301,13 @@ class MainFragment : Fragment() {
             }
         }
 
+        // ── Clear History (lives in content view so Save/Cancel always stay on one row) ──
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_clear_history)
+            .setOnClickListener {
+                viewModel.clearHistory()
+                Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
+            }
+
         // ── Kokoro download section ───────────────────────────────
         val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
         val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
@@ -381,10 +388,6 @@ class MainFragment : Fragment() {
                     .putString(TourGuideService.PREF_ELEVENLABS_KEY, elKey)
                     .apply()
                 Toast.makeText(requireContext(), "Settings saved", Toast.LENGTH_SHORT).show()
-            }
-            .setNeutralButton("Clear History") { _, _ ->
-                viewModel.clearHistory()
-                Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { kokoroStateJob.cancel() }
