@@ -61,7 +61,6 @@ class TourGuideService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        initTtsEngine()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -267,7 +266,7 @@ class TourGuideService : LifecycleService() {
             }
             "kokoro" -> {
                 if (kokoroModelManager.isReady) {
-                    KokoroTtsEngine(this, lifecycleScope, kokoroModelManager.modelDir)
+                    KokoroTtsEngine(this, kokoroModelManager.modelDir)
                 } else {
                     Log.w(TAG, "Kokoro model not downloaded — falling back to Android TTS")
                     AndroidTtsEngine(this)

@@ -7,9 +7,10 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -17,10 +18,12 @@ import java.util.UUID
 
 class KokoroTtsEngine(
     private val context: Context,
-    private val scope: CoroutineScope,
     private val modelDir: File,
     val voiceSid: Int = DEFAULT_VOICE_ID,
 ) : TtsEngine {
+
+    // Private scope so shutdown() cancels both the init job and any speak job.
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override var isReady: Boolean = false
         private set
@@ -34,7 +37,7 @@ class KokoroTtsEngine(
     override val canResume: Boolean get() = isPaused && mediaPlayer != null
 
     init {
-        scope.launch(Dispatchers.Default) {
+        engineScope.launch {
             try {
                 val config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
@@ -67,7 +70,7 @@ class KokoroTtsEngine(
     ) {
         stop()
         val engine = tts ?: run { onError(); return }
-        speakJob = scope.launch {
+        speakJob = engineScope.launch {
             try {
                 val wavFile = File(context.cacheDir, "kokoro_${UUID.randomUUID()}.wav")
                 currentFile = wavFile
@@ -136,7 +139,14 @@ class KokoroTtsEngine(
         currentFile = null
     }
 
-    override fun shutdown() = stop()
+    override fun shutdown() {
+        engineScope.cancel()
+        try { mediaPlayer?.stop() } catch (_: Exception) {}
+        mediaPlayer?.release()
+        mediaPlayer = null
+        currentFile?.delete()
+        currentFile = null
+    }
 
     companion object {
         private const val TAG = "KokoroTtsEngine"
