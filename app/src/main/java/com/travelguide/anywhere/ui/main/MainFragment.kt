@@ -333,7 +333,7 @@ class MainFragment : Fragment() {
                     tvKokoroStatus.text = "Not downloaded"
                     progressKokoro.visibility = View.GONE
                     btnKokoroDownload.visibility = View.VISIBLE
-                    btnKokoroDownload.text = "Download model (~315 MB)"
+                    btnKokoroDownload.text = "Download model (~350 MB)"
                     btnKokoroDownload.isEnabled = true
                 }
                 is KokoroModelManager.DownloadState.Downloading -> {
@@ -467,16 +467,61 @@ class MainFragment : Fragment() {
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
 
+        // kokoro-multi-lang-v1_0 — speaker IDs 0-52
         val KOKORO_VOICES = listOf(
-            "af — American female (default)" to 0,
-            "af_bella — American female" to 1,
-            "af_nicole — American female" to 2,
-            "af_sarah — American female" to 3,
-            "af_sky — American female" to 4,
-            "am_adam — American male" to 5,
-            "am_michael — American male" to 6,
-            "bf_emma — British female" to 7,
-            "bf_isabella — British female" to 8,
+            "af_alloy — American female" to 0,
+            "af_aoede — American female" to 1,
+            "af_bella — American female" to 2,
+            "af_heart — American female" to 3,
+            "af_jessica — American female" to 4,
+            "af_kore — American female" to 5,
+            "af_nicole — American female" to 6,
+            "af_nova — American female" to 7,
+            "af_river — American female" to 8,
+            "af_sarah — American female" to 9,
+            "af_sky — American female" to 10,
+            "am_adam — American male" to 11,
+            "am_echo — American male" to 12,
+            "am_eric — American male" to 13,
+            "am_fenrir — American male" to 14,
+            "am_liam — American male" to 15,
+            "am_michael — American male" to 16,
+            "am_onyx — American male" to 17,
+            "am_puck — American male" to 18,
+            "am_santa — American male" to 19,
+            "bf_alice — British female" to 20,
+            "bf_emma — British female" to 21,
+            "bf_isabella — British female" to 22,
+            "bf_lily — British female" to 23,
+            "bm_daniel — British male" to 24,
+            "bm_fable — British male" to 25,
+            "bm_george — British male" to 26,
+            "bm_lewis — British male" to 27,
+            "ef_dora — Spanish female" to 28,
+            "em_alex — Spanish male" to 29,
+            "ff_siwis — French female" to 30,
+            "hf_alpha — Hindi female" to 31,
+            "hf_beta — Hindi female" to 32,
+            "hm_omega — Hindi male" to 33,
+            "hm_psi — Hindi male" to 34,
+            "if_sara — Italian female" to 35,
+            "im_nicola — Italian male" to 36,
+            "jf_alpha — Japanese female" to 37,
+            "jf_gongitsune — Japanese female" to 38,
+            "jf_nezumi — Japanese female" to 39,
+            "jf_tebukuro — Japanese female" to 40,
+            "jm_kumo — Japanese male" to 41,
+            "pf_dora — Portuguese female" to 42,
+            "pm_alex — Portuguese male" to 43,
+            "pm_santa — Portuguese male" to 44,
+            "zf_xiaobei — Chinese female" to 45,
+            "zf_xiaoni — Chinese female" to 46,
+            "zf_xiaoxiao — Chinese female" to 47,
+            "zf_xiaoyi — Chinese female" to 48,
+            "zm_yunjian — Chinese male" to 49,
+            "zm_yunxi — Chinese male" to 50,
+            "zm_yunxia — Chinese male" to 51,
+            "zm_yunyang — Chinese male" to 52,
         )
     }
 }

@@ -122,8 +122,8 @@ class KokoroModelManager @Inject constructor(
 
     companion object {
         private const val TAG = "KokoroModelManager"
-        private const val MODEL_DIR_NAME = "kokoro-en-v0_19"
+        private const val MODEL_DIR_NAME = "kokoro-multi-lang-v1_0"
         const val MODEL_URL =
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2"
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2"
     }
 }

@@ -283,7 +283,7 @@
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Download model (~315 MB)"
+            android:text="Download model (~350 MB)"
             android:visibility="gone" />
 
         <com.google.android.material.textfield.TextInputLayout
