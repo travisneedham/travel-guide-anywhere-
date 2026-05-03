@@ -1,6 +1,8 @@
 package com.travelguide.anywhere.service
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.PowerManager
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +17,7 @@ import okhttp3.Request
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -45,7 +48,6 @@ class KokoroModelManager @Inject constructor(
     private val _state = MutableStateFlow<DownloadState>(DownloadState.NotDownloaded)
     val state: StateFlow<DownloadState> = _state
 
-    // Root dir where the tarball extracts to: filesDir/kokoro-en-v0_19/
     val modelDir: File get() = File(context.filesDir, MODEL_DIR_NAME)
 
     val isReady: Boolean
@@ -64,19 +66,47 @@ class KokoroModelManager @Inject constructor(
     }
 
     private suspend fun download() = withContext(Dispatchers.IO) {
-        _state.value = DownloadState.Downloading(0f)
+        // Keep CPU and WiFi alive for the full download even when the screen is off.
+        val wakeLock = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "TravelGuide:KokoroDownload")
+            .also { it.acquire(40 * 60 * 1000L) } // 40-minute cap
+        @Suppress("DEPRECATION")
+        val wifiLock = (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+            .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "TravelGuide:KokoroDownload")
+            .also { it.acquire() }
+
         val tempFile = File(context.cacheDir, "kokoro-model.tar.bz2")
         try {
-            val request = Request.Builder().url(MODEL_URL).build()
-            downloadClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-                val body = response.body ?: throw IOException("Empty response")
-                val totalBytes = body.contentLength()
-                var downloadedBytes = 0L
-                var lastReportedPercent = -1
+            // Resume from a partial download left by a previous interrupted attempt.
+            val resumeFrom = if (tempFile.exists()) tempFile.length() else 0L
+            if (resumeFrom > 0) Log.i(TAG, "Resuming download from byte $resumeFrom")
 
-                body.byteStream().use { input ->
-                    tempFile.outputStream().use { output ->
+            val request = Request.Builder()
+                .url(MODEL_URL)
+                .apply { if (resumeFrom > 0) header("Range", "bytes=$resumeFrom-") }
+                .build()
+
+            downloadClient.newCall(request).execute().use { response ->
+                val resuming = response.code == 206
+                if (!response.isSuccessful && !resuming) throw IOException("HTTP ${response.code}")
+                if (!resuming && resumeFrom > 0) {
+                    // Server doesn't support Range; discard partial file and start over.
+                    tempFile.delete()
+                    Log.w(TAG, "Server ignored Range header — restarting download")
+                }
+
+                val body = response.body ?: throw IOException("Empty response")
+                val contentLength = body.contentLength()
+                val startBytes = if (resuming) resumeFrom else 0L
+                val totalBytes = if (contentLength > 0) startBytes + contentLength else 0L
+                var downloadedBytes = startBytes
+                var lastReportedPercent = if (totalBytes > 0) ((startBytes * 100) / totalBytes).toInt() else -1
+
+                if (totalBytes > 0) _state.value = DownloadState.Downloading(startBytes.toFloat() / totalBytes)
+
+                // Append when resuming, overwrite otherwise.
+                FileOutputStream(tempFile, resuming).use { output ->
+                    body.byteStream().use { input ->
                         val buf = ByteArray(64 * 1024)
                         var read: Int
                         while (input.read(buf).also { read = it } != -1) {
@@ -100,9 +130,12 @@ class KokoroModelManager @Inject constructor(
             Log.i(TAG, "Kokoro model ready at ${modelDir.absolutePath}")
             _state.value = DownloadState.Ready
         } catch (e: Exception) {
-            tempFile.delete()
+            // Keep the temp file so the next attempt can resume rather than restart.
             Log.e(TAG, "Kokoro download failed: ${e.message}")
             _state.value = DownloadState.Error(e.message ?: "Unknown error")
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
+            if (wifiLock.isHeld) wifiLock.release()
         }
     }
 
