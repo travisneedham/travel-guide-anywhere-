@@ -68,6 +68,7 @@ class MainFragment : Fragment() {
         setupSlider()
         setupButtons()
         observeState()
+        checkKokoroOnStartup()
     }
 
     private fun setupSlider() {
@@ -137,6 +138,36 @@ class MainFragment : Fragment() {
         binding.btnSettings.setOnClickListener { showSettingsDialog() }
     }
 
+    private fun checkKokoroOnStartup() {
+        // If already ready, ensure kokoro is selected (first-time auto-select only).
+        if (kokoroModelManager.isReady) {
+            if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
+                prefs.edit()
+                    .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
+                    .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
+                    .apply()
+            }
+            return
+        }
+        // Don't stack a prompt on top of an already-running download.
+        val s = kokoroModelManager.state.value
+        if (s is KokoroModelManager.DownloadState.Downloading ||
+            s is KokoroModelManager.DownloadState.Extracting) return
+
+        val hasPartial = File(requireContext().cacheDir, "kokoro-model.tar.bz2")
+            .let { it.exists() && it.length() > 0 }
+        val buttonLabel = if (hasPartial) "Resume Download" else "Download (~350 MB)"
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Download AI Voice?")
+            .setMessage(
+                "Kokoro provides high-quality, on-device narration — no internet needed once installed. The model is ~350 MB."
+            )
+            .setPositiveButton(buttonLabel) { _, _ -> kokoroModelManager.downloadIfNeeded() }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
     private fun resolveApiKey(): String {
         val saved = prefs.getString(PREF_API_KEY, null)
         return if (!saved.isNullOrBlank()) saved else BuildConfig.ANTHROPIC_API_KEY
@@ -151,6 +182,18 @@ class MainFragment : Fragment() {
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 }}}
+                // Auto-select Kokoro the first time the model becomes ready.
+                launch {
+                    kokoroModelManager.state.collect { state ->
+                        if (state is KokoroModelManager.DownloadState.Ready &&
+                            !prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
+                            prefs.edit()
+                                .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
+                                .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
+                                .apply()
+                        }
+                    }
+                }
             }
         }
     }
@@ -491,6 +534,7 @@ class MainFragment : Fragment() {
         const val PREF_API_KEY = "pref_api_key"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
+        private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52
         val KOKORO_VOICES = listOf(
