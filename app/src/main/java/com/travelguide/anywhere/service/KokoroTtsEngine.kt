@@ -40,6 +40,11 @@ class KokoroTtsEngine(
     private var mediaPlayer: MediaPlayer? = null
     private var isPaused = false
 
+    // Pre-generated first chunk for the NEXT narration, started while current narration
+    // finishes playing so speak() can begin with zero generation delay.
+    private var prewarmChunk: String? = null
+    private var prewarmJob: Deferred<Pair<MediaPlayer, File>?>? = null
+
     override val canResume: Boolean get() = isPaused && mediaPlayer != null
 
     init {
@@ -68,12 +73,24 @@ class KokoroTtsEngine(
         }
     }
 
+    override fun prewarm(text: String, speechRate: Float) {
+        val engine = tts ?: return
+        val chunk = splitIntoChunks(normalizeForTts(text)).firstOrNull() ?: return
+        prewarmJob?.cancel()
+        prewarmChunk = chunk
+        prewarmJob = engineScope.async(Dispatchers.IO) {
+            Log.d(TAG, "Prewarm: generating chunk[${chunk.length}ch]")
+            preparePlayer(engine, chunk, speechRate)
+        }
+    }
+
     override fun speak(
         text: String,
         speechRate: Float,
         onStart: () -> Unit,
         onDone: () -> Unit,
         onError: () -> Unit,
+        onEnqueued: () -> Unit,
     ) {
         stop()
         val engine = tts ?: run { onError(); return }
@@ -82,12 +99,17 @@ class KokoroTtsEngine(
         speakJob = engineScope.launch {
             var onStartCalled = false
 
-            // Kick off generation + prepare for chunk 0 immediately.
-            // Each Deferred produces a fully-prepared MediaPlayer so mp.start()
-            // can fire with zero setup delay when the current chunk ends.
-            var pendingPlay: Deferred<Pair<MediaPlayer, File>?> = async(Dispatchers.IO) {
-                preparePlayer(engine, chunks[0], speechRate)
-            }
+            // Use a pre-warmed player for chunk 0 if one matches, otherwise generate now.
+            val storedJob = prewarmJob; val storedChunk = prewarmChunk
+            prewarmJob = null; prewarmChunk = null
+            var pendingPlay: Deferred<Pair<MediaPlayer, File>?> =
+                if (storedJob != null && storedChunk == chunks.firstOrNull()) {
+                    Log.d(TAG, "Using prewarm result for chunk 0")
+                    storedJob
+                } else {
+                    storedJob?.cancel()
+                    async(Dispatchers.IO) { preparePlayer(engine, chunks[0], speechRate) }
+                }
 
             for (idx in chunks.indices) {
                 if (!isActive) { pendingPlay.cancel(); return@launch }
@@ -104,6 +126,10 @@ class KokoroTtsEngine(
                     pendingPlay = async(Dispatchers.IO) {
                         preparePlayer(engine, chunks[idx + 1], speechRate)
                     }
+                } else {
+                    // Last chunk is ready; engine is now idle — signal caller to prewarm
+                    // the next narration while this final chunk plays.
+                    withContext(Dispatchers.Main) { onEnqueued() }
                 }
 
                 if (!isActive) {

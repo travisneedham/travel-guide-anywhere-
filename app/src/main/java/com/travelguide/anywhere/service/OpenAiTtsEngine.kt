@@ -38,7 +38,7 @@ class OpenAiTtsEngine(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit) {
+    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit, onEnqueued: () -> Unit) {
         stop()
         speakJob = scope.launch {
             try {

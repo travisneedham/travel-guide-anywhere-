@@ -30,7 +30,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         }
     }
 
-    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit) {
+    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit, onEnqueued: () -> Unit) {
         val chunks = splitIntoChunks(text)
         savedChunks = chunks
         currentChunkIndex = 0

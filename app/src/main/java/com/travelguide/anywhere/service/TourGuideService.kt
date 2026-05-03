@@ -193,14 +193,23 @@ class TourGuideService : LifecycleService() {
         emitCurrentTopic(topicName)
         updateNotification("Loading audio: $topicName")
 
+        val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
         engine.speak(
             text = text,
-            speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f),
+            speechRate = speechRate,
             onStart = {
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
                 // Audio is playing — fetch the next POI + script in the background.
                 lastLocation?.let { prefetchNextNarration(it) }
+            },
+            onEnqueued = {
+                // Last chunk is generated; engine is idle while it plays.
+                // Pre-warm chunk 0 of the next narration so speak() can start instantly.
+                prefetchedNarration?.second?.let { nextText ->
+                    Log.d(TAG, "onEnqueued: prewarm triggered for next narration")
+                    ttsEngine?.prewarm(nextText, speechRate)
+                }
             },
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
