@@ -368,7 +368,7 @@ class MainFragment : Fragment() {
 
         btnKokoroDownload.setOnClickListener {
             btnKokoroDownload.isEnabled = false
-            kokoroModelManager.downloadIfNeeded(lifecycleScope)
+            kokoroModelManager.downloadIfNeeded()
         }
 
         val kokoroStateJob = lifecycleScope.launch {

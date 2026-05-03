@@ -5,6 +5,7 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -23,6 +24,9 @@ import javax.inject.Singleton
 class KokoroModelManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    // Application-scoped so downloads survive navigation / screen rotation.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     // Dedicated client with no body-logging interceptor — the shared app client buffers
     // the entire response for logging which OOMs on a 305 MB download.
     private val downloadClient = OkHttpClient.Builder()
@@ -53,7 +57,7 @@ class KokoroModelManager @Inject constructor(
         if (isReady) _state.value = DownloadState.Ready
     }
 
-    fun downloadIfNeeded(scope: CoroutineScope) {
+    fun downloadIfNeeded() {
         if (_state.value is DownloadState.Downloading) return
         if (isReady) { _state.value = DownloadState.Ready; return }
         scope.launch { download() }
