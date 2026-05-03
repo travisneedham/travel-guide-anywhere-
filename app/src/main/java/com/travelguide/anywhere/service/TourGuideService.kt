@@ -76,6 +76,8 @@ class TourGuideService : LifecycleService() {
                 mentionedPlacesStore.load()
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
+                // Persist radius so Android Auto can restart the tour without a UI interaction.
+                sharedPrefs.edit().putFloat(PREF_LAST_RADIUS, radiusMiles).apply()
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
                 emitState(TourState.LOCATING)
@@ -382,6 +384,7 @@ class TourGuideService : LifecycleService() {
         const val PREF_ELEVENLABS_VOICE = "pref_elevenlabs_voice"
         const val ACTION_SET_SPEED = "ACTION_SET_SPEED"
         const val EXTRA_SPEECH_RATE = "EXTRA_SPEECH_RATE"
+        const val PREF_LAST_RADIUS = "pref_last_radius"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)
