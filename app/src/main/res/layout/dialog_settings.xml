@@ -339,7 +339,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="Copy Last 30 Log Lines" />
+            android:text="Copy TTS Logs" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_export_logs"

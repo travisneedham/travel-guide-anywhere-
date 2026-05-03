@@ -423,10 +423,10 @@ class MainFragment : Fragment() {
         dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_copy_logs)
             .setOnClickListener {
                 lifecycleScope.launch {
-                    val logs = readLogcat(maxLines = 30)
+                    val logs = readTtsLogs()
                     val cm = requireContext().getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("travel_guide_logs", logs))
-                    Toast.makeText(requireContext(), "Last 30 lines copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "TTS logs copied to clipboard", Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -508,6 +508,28 @@ class MainFragment : Fragment() {
             }
         } catch (e: Exception) {
             "Balance unavailable"
+        }
+    }
+
+    // Filters the full logcat to just our TTS/service tags — avoids Android framework
+    // noise swamping the output when using the 30-line cap.
+    private suspend fun readTtsLogs(): String = withContext(Dispatchers.IO) {
+        val interestingTags = setOf(
+            "KokoroTtsEngine", "TourGuideService", "NarrationRepository",
+            "PoiRepository", "KokoroModelManager", "AndroidTtsEngine"
+        )
+        try {
+            val pid = android.os.Process.myPid().toString()
+            val process = Runtime.getRuntime().exec(
+                arrayOf("logcat", "-d", "--pid", pid, "-v", "time")
+            )
+            process.inputStream.bufferedReader()
+                .lineSequence()
+                .filter { line -> interestingTags.any { line.contains(it) } }
+                .joinToString("\n")
+                .ifBlank { "(no TTS logs found — run a tour first)" }
+        } catch (e: Exception) {
+            "Error reading logcat: ${e.message}"
         }
     }
 
