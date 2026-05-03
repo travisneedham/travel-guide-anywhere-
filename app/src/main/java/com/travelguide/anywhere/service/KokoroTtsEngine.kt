@@ -82,57 +82,49 @@ class KokoroTtsEngine(
         speakJob = engineScope.launch {
             var onStartCalled = false
 
-            // Kick off generation of chunk 0 immediately so the loop can
-            // start the NEXT chunk's generation while this chunk is playing.
-            var pendingGen: Deferred<File?> = async(Dispatchers.Default) {
-                generateWav(engine, chunks[0], speechRate)
+            // Kick off generation + prepare for chunk 0 immediately.
+            // Each Deferred produces a fully-prepared MediaPlayer so mp.start()
+            // can fire with zero setup delay when the current chunk ends.
+            var pendingPlay: Deferred<Pair<MediaPlayer, File>?> = async(Dispatchers.IO) {
+                preparePlayer(engine, chunks[0], speechRate)
             }
 
             for (idx in chunks.indices) {
-                if (!isActive) { pendingGen.cancel(); return@launch }
+                if (!isActive) { pendingPlay.cancel(); return@launch }
                 val isLast = idx == chunks.lastIndex
 
-                // Wait for the already-started generation to finish.
-                val wavFile = pendingGen.await() ?: run {
+                val result = pendingPlay.await() ?: run {
                     withContext(Dispatchers.Main) { onError() }
                     return@launch
                 }
+                val (mp, wavFile) = result
 
-                // Pre-generate the next chunk in the background while this one plays.
+                // While this chunk plays, generate + prepare the next one.
                 if (!isLast) {
-                    pendingGen = async(Dispatchers.Default) {
-                        generateWav(engine, chunks[idx + 1], speechRate)
+                    pendingPlay = async(Dispatchers.IO) {
+                        preparePlayer(engine, chunks[idx + 1], speechRate)
                     }
                 }
 
                 if (!isActive) {
+                    mp.release()
                     wavFile.delete()
-                    if (!isLast) pendingGen.cancel()
+                    if (!isLast) pendingPlay.cancel()
                     return@launch
                 }
 
                 val ok = withContext(Dispatchers.Main) {
                     suspendCancellableCoroutine { cont ->
-                        val mp = MediaPlayer()
-                        try {
-                            mp.setDataSource(wavFile.absolutePath)
-                            mp.setOnCompletionListener {
-                                wavFile.delete()
-                                mediaPlayer = null
-                                cont.resume(true)
-                            }
-                            mp.setOnErrorListener { _, _, _ ->
-                                wavFile.delete()
-                                mediaPlayer = null
-                                cont.resume(false)
-                                true
-                            }
-                            mp.prepare()
-                        } catch (e: Exception) {
-                            mp.release()
+                        mp.setOnCompletionListener {
                             wavFile.delete()
+                            mediaPlayer = null
+                            cont.resume(true)
+                        }
+                        mp.setOnErrorListener { _, _, _ ->
+                            wavFile.delete()
+                            mediaPlayer = null
                             cont.resume(false)
-                            return@suspendCancellableCoroutine
+                            true
                         }
                         mediaPlayer?.release()
                         mediaPlayer = mp
@@ -151,7 +143,7 @@ class KokoroTtsEngine(
                 }
 
                 if (!ok) {
-                    if (!isLast) pendingGen.cancel()
+                    if (!isLast) pendingPlay.cancel()
                     withContext(Dispatchers.Main) { onError() }
                     return@launch
                 }
@@ -161,15 +153,23 @@ class KokoroTtsEngine(
         }
     }
 
-    // Generates a single chunk to a temp WAV file. Returns null on error.
-    private fun generateWav(engine: OfflineTts, chunk: String, speechRate: Float): File? {
+    // Generates WAV and prepares a MediaPlayer in one background step so
+    // the player is ready to start() the instant the previous chunk ends.
+    private fun preparePlayer(engine: OfflineTts, chunk: String, speechRate: Float): Pair<MediaPlayer, File>? {
         val wavFile = File(context.cacheDir, "kokoro_${UUID.randomUUID()}.wav")
         return try {
-            engine.generate(text = chunk, sid = voiceSid, speed = speechRate)
-                .save(wavFile.absolutePath)
-            wavFile
+            val t0 = System.currentTimeMillis()
+            engine.generate(text = chunk, sid = voiceSid, speed = speechRate).save(wavFile.absolutePath)
+            val genMs = System.currentTimeMillis() - t0
+            val mp = MediaPlayer().also {
+                it.setDataSource(wavFile.absolutePath)
+                it.prepare()
+            }
+            val totalMs = System.currentTimeMillis() - t0
+            Log.d(TAG, "chunk[${chunk.length}ch] gen=${genMs}ms prepare+total=${totalMs}ms")
+            mp to wavFile
         } catch (e: Exception) {
-            Log.e(TAG, "Kokoro generate error: ${e.message}")
+            Log.e(TAG, "preparePlayer error: ${e.message}")
             wavFile.delete()
             null
         }
