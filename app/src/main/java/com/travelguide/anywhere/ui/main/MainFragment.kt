@@ -26,6 +26,7 @@ import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.databinding.FragmentMainBinding
+import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
@@ -163,7 +164,7 @@ class MainFragment : Fragment() {
             .setMessage(
                 "Kokoro provides high-quality, on-device narration — no internet needed once installed. The model is ~350 MB."
             )
-            .setPositiveButton(buttonLabel) { _, _ -> kokoroModelManager.downloadIfNeeded() }
+            .setPositiveButton(buttonLabel) { _, _ -> KokoroDownloadService.start(requireContext()) }
             .setNegativeButton("Later", null)
             .show()
     }
@@ -411,7 +412,7 @@ class MainFragment : Fragment() {
 
         btnKokoroDownload.setOnClickListener {
             btnKokoroDownload.isEnabled = false
-            kokoroModelManager.downloadIfNeeded()
+            KokoroDownloadService.start(requireContext())
         }
 
         val kokoroStateJob = lifecycleScope.launch {
