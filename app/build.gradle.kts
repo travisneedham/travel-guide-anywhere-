@@ -22,8 +22,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
-        versionName = "1.8.3"
+        versionCode = 41
+        versionName = "1.8.4"
 
         buildConfigField(
             "String",
@@ -32,12 +32,26 @@ android {
         )
     }
 
+    signingConfigs {
+        // Shared debug keystore committed to the repo so APKs from Android Studio
+        // and GitHub Actions are signed identically and can update each other.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         viewBinding = true
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
