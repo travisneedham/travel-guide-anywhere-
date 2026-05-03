@@ -46,12 +46,14 @@ class TourGuideService : LifecycleService() {
     private var apiKey = ""
     private var lastLocation: Location? = null
     private var generationJob: Job? = null
+    private var prefetchJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
     private var savedTopicName = ""
 
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
     @Volatile private var speakStartTime: Long = 0L
+    @Volatile private var prefetchedNarration: Pair<PlaceOfInterest, String>? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -151,6 +153,27 @@ class TourGuideService : LifecycleService() {
         }
     }
 
+    // Runs in the background while the current narration is playing so the
+    // next POI + script is ready the moment this one finishes.
+    private fun prefetchNextNarration(location: Location) {
+        if (prefetchJob?.isActive == true) return
+        prefetchJob = lifecycleScope.launch {
+            try {
+                val pois = poiRepository.fetchPois(location, radiusMiles)
+                    .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
+                if (pois.isEmpty()) return@launch
+                val poi = pois.first()
+                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                prefetchedNarration = poi to narration
+                Log.d(TAG, "Prefetched next narration: ${poi.name}")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Prefetch failed — will use normal cycle: ${e.message}")
+            }
+        }
+    }
+
     private fun speak(text: String, topicName: String) {
         val engine = ttsEngine
         if (engine == null || !engine.isReady) {
@@ -174,6 +197,8 @@ class TourGuideService : LifecycleService() {
             onStart = {
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
+                // Audio is playing — fetch the next POI + script in the background.
+                lastLocation?.let { prefetchNextNarration(it) }
             },
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
@@ -186,7 +211,22 @@ class TourGuideService : LifecycleService() {
                         mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
-                    lastLocation?.let { onLocationUpdate(it) }
+
+                    // Use the pre-fetched narration if it finished in time.
+                    val prefetched = prefetchedNarration.also { prefetchedNarration = null }
+                    prefetchJob?.cancel(); prefetchJob = null
+
+                    val nextPoi = prefetched?.first
+                    val nextNarration = prefetched?.second
+                    if (nextPoi != null && nextNarration != null &&
+                        !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
+                        mentionedPlacesStore.sessionNames.add(nextPoi.name)
+                        currentNarrationPoi = nextPoi
+                        emitCurrentPois(listOf(nextPoi))
+                        speak(nextNarration, nextPoi.name)
+                    } else {
+                        lastLocation?.let { onLocationUpdate(it) }
+                    }
                 }
             },
             onError = {
@@ -194,6 +234,8 @@ class TourGuideService : LifecycleService() {
                 isSpeaking = false
                 lifecycleScope.launch {
                     emitCurrentTopic("")
+                    prefetchJob?.cancel(); prefetchJob = null
+                    prefetchedNarration = null
                     lastLocation?.let { onLocationUpdate(it) }
                 }
             }
@@ -230,6 +272,8 @@ class TourGuideService : LifecycleService() {
         currentNarrationPoi = null
         emitCurrentTopic("")
         generationJob?.cancel()
+        prefetchJob?.cancel(); prefetchJob = null
+        prefetchedNarration = null
         ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
@@ -240,6 +284,8 @@ class TourGuideService : LifecycleService() {
     private fun stopTour() {
         currentNarrationPoi = null
         generationJob?.cancel()
+        prefetchJob?.cancel(); prefetchJob = null
+        prefetchedNarration = null
         fusedLocation.removeLocationUpdates(locationCallback)
         ttsEngine?.stop()
         isSpeaking = false
