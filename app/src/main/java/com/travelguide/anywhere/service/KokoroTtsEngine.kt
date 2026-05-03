@@ -77,7 +77,7 @@ class KokoroTtsEngine(
     ) {
         stop()
         val engine = tts ?: run { onError(); return }
-        val chunks = splitIntoChunks(text)
+        val chunks = splitIntoChunks(normalizeForTts(text))
 
         speakJob = engineScope.launch {
             var onStartCalled = false
@@ -172,6 +172,34 @@ class KokoroTtsEngine(
             Log.e(TAG, "preparePlayer error: ${e.message}")
             wavFile.delete()
             null
+        }
+    }
+
+    // Converts 4-digit years (1000–2099) to their spoken form so Kokoro reads
+    // them naturally. Claude is also instructed to do this, but this is a safety net.
+    private fun normalizeForTts(text: String): String =
+        Regex("""\b(1[0-9]{3}|20[0-9]{2})\b""").replace(text) { yearToWords(it.value.toInt()) }
+
+    private fun yearToWords(year: Int): String {
+        val ones = listOf(
+            "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+            "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+            "sixteen", "seventeen", "eighteen", "nineteen"
+        )
+        val tens = listOf("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+        fun pair(n: Int) = when {
+            n < 20     -> ones[n]
+            n % 10 == 0 -> tens[n / 10]
+            else        -> "${tens[n / 10]}-${ones[n % 10]}"
+        }
+        if (year == 2000) return "two thousand"
+        if (year in 2001..2009) return "two thousand ${ones[year - 2000]}"
+        val hi = year / 100
+        val lo = year % 100
+        return when {
+            lo == 0 -> "${pair(hi)} hundred"
+            lo < 10 -> "${pair(hi)} oh ${ones[lo]}"
+            else    -> "${pair(hi)} ${pair(lo)}"
         }
     }
 
