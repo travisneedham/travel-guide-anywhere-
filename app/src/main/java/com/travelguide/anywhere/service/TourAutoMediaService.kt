@@ -136,9 +136,9 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
             }
         }
 
-        override fun onPause()       = send(TourGuideService.ACTION_PAUSE)
-        override fun onSkipToNext()  = send(TourGuideService.ACTION_SKIP)
-        override fun onStop()        = send(TourGuideService.ACTION_STOP)
+        override fun onPause()      { send(TourGuideService.ACTION_PAUSE) }
+        override fun onSkipToNext() { send(TourGuideService.ACTION_SKIP) }
+        override fun onStop()       { send(TourGuideService.ACTION_STOP) }
 
         private fun startTour() {
             val prefs = getSharedPreferences(TourGuideService.PREFS_NAME, MODE_PRIVATE)
