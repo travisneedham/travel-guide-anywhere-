@@ -315,18 +315,7 @@ class TourGuideService : LifecycleService() {
                 if (kokoroModelManager.isReady) {
                     val sid = sharedPrefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, 0)
                         .coerceIn(0, MainFragment.KOKORO_VOICES.size - 1)
-                    val voiceName = MainFragment.KOKORO_VOICES[sid].first
-                    val lang = when (voiceName.take(1)) {
-                        "a", "b" -> "en-us"
-                        "e"      -> "es"
-                        "f"      -> "fr-fr"
-                        "h"      -> "hi"
-                        "i"      -> "it"
-                        "j"      -> "ja"
-                        "p"      -> "pt-br"
-                        "z"      -> "zh-cn"
-                        else     -> "en-us"
-                    }
+                    val lang = MainFragment.langForVoiceSid(sid)
                     KokoroTtsEngine(this, kokoroModelManager.modelDir, voiceSid = sid, lang = lang)
                 } else {
                     Log.w(TAG, "Kokoro model not downloaded — falling back to Android TTS")
