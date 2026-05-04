@@ -50,14 +50,10 @@ jobs:
       - name: Generate release notes
         id: notes
         run: |
-          PREV_TAG=$(git tag --sort=-creatordate | grep '^v' | head -1 2>/dev/null || true)
-          if [ -n "$PREV_TAG" ]; then
-            CHANGES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges | head -30)
-          else
-            CHANGES=$(git log --pretty=format:"- %s" --no-merges | head -30)
-          fi
+          # Use the HEAD commit message, minus the session URL line
+          CHANGES=$(git log -1 --pretty=format:"%B" | grep -v "^https://claude\.ai")
           if [ -z "$CHANGES" ]; then
-            CHANGES="- See commit history for changes"
+            CHANGES="See commit history for details."
           fi
           {
             echo "changes<<NOTES_EOF"
