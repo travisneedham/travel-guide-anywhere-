@@ -8,345 +8,527 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
+        android:animateLayoutChanges="true"
         android:padding="24dp">
 
-        <!-- ── Anthropic API Key ─────────────────────────────── -->
-        <TextView
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- API KEY section                                         -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:id="@+id/header_api"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Anthropic API Key"
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:layout_marginBottom="8dp" />
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            app:endIconMode="password_toggle">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_api_key"
-                android:layout_width="match_parent"
+            <TextView
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:hint="sk-ant-..."
-                android:inputType="textPassword"
-                android:fontFamily="monospace" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_weight="1"
+                android:text="ANTHROPIC API KEY"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
 
-        <!-- ── Voice Speed ──────────────────────────────────── -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Voice Speed"
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:layout_marginBottom="4dp" />
+            <TextView
+                android:id="@+id/ind_api"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▼"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
 
-        <com.google.android.material.slider.Slider
-            android:id="@+id/slider_speech_rate"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:valueFrom="0.5"
-            android:valueTo="1.5"
-            android:stepSize="0.05"
-            android:value="0.95"
-            android:layout_marginBottom="24dp"
-            app:thumbColor="@color/accent"
-            app:trackColorActive="@color/accent"
-            app:trackColorInactive="@color/stroke" />
-
-        <!-- ── Divider ─────────────────────────────────────── -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/stroke"
-            android:layout_marginBottom="20dp" />
-
-        <!-- ── Voice Engine selector ──────────────────────── -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="VOICE ENGINE"
-            android:textSize="11sp"
-            android:textColor="@color/text_secondary"
-            android:textAllCaps="true"
-            android:letterSpacing="0.1"
-            android:layout_marginBottom="12dp" />
-
-        <RadioGroup
-            android:id="@+id/rg_tts_provider"
+        <LinearLayout
+            android:id="@+id/body_api"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="20dp">
+            android:paddingBottom="16dp">
 
-            <RadioButton
-                android:id="@+id/rb_android"
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Android TTS (free, works offline)"
-                android:textColor="@color/text_primary"
-                android:buttonTint="@color/accent" />
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                app:endIconMode="password_toggle">
 
-            <RadioButton
-                android:id="@+id/rb_openai"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="OpenAI"
-                android:textColor="@color/text_primary"
-                android:buttonTint="@color/accent" />
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_api_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="sk-ant-..."
+                    android:inputType="textPassword"
+                    android:fontFamily="monospace" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
 
-            <RadioButton
-                android:id="@+id/rb_elevenlabs"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="ElevenLabs"
-                android:textColor="@color/text_primary"
-                android:buttonTint="@color/accent" />
-
-            <RadioButton
-                android:id="@+id/rb_kokoro"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Kokoro (free, on-device, high quality)"
-                android:textColor="@color/text_primary"
-                android:buttonTint="@color/accent" />
-
-        </RadioGroup>
-
-        <!-- ── Divider ─────────────────────────────────────── -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/stroke"
-            android:layout_marginBottom="20dp" />
+            android:background="@color/stroke" />
 
-        <!-- ── OpenAI section ──────────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- VOICE section                                           -->
+        <!-- ═══════════════════════════════════════════════════════ -->
         <LinearLayout
+            android:id="@+id/header_voice"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="10dp">
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="OPENAI TTS"
+                android:text="VOICE"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:textAllCaps="true"
                 android:letterSpacing="0.1" />
 
             <TextView
-                android:id="@+id/tv_openai_balance"
+                android:id="@+id/ind_voice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Loading..."
-                android:textSize="12sp"
-                android:textColor="@color/accent" />
+                android:text="▼"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
         </LinearLayout>
 
-        <com.google.android.material.textfield.TextInputLayout
+        <LinearLayout
+            android:id="@+id/body_voice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            app:endIconMode="password_toggle">
+            android:orientation="vertical"
+            android:paddingBottom="16dp">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_openai_key"
+            <!-- Speed -->
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="sk-..."
-                android:inputType="textPassword"
-                android:fontFamily="monospace" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:text="Speed"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginBottom="4dp" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_openai_model"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            android:hint="Model"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
-
-            <AutoCompleteTextView
-                android:id="@+id/actv_openai_model"
+            <com.google.android.material.slider.Slider
+                android:id="@+id/slider_speech_rate"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:focusable="false"
-                android:focusableInTouchMode="false"
-                android:inputType="none"
-                android:textColor="@color/text_primary" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:valueFrom="0.5"
+                android:valueTo="1.5"
+                android:stepSize="0.05"
+                android:value="0.95"
+                android:layout_marginBottom="20dp"
+                app:thumbColor="@color/accent"
+                app:trackColorActive="@color/accent"
+                app:trackColorInactive="@color/stroke" />
 
-        <!-- ── Divider ─────────────────────────────────────── -->
+            <!-- Engine -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Engine"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginBottom="8dp" />
+
+            <RadioGroup
+                android:id="@+id/rg_tts_provider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="16dp">
+
+                <RadioButton
+                    android:id="@+id/rb_android"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Android TTS (free, offline)"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent" />
+
+                <RadioButton
+                    android:id="@+id/rb_openai"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="OpenAI"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent" />
+
+                <RadioButton
+                    android:id="@+id/rb_kokoro"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Kokoro (free, on-device, high quality)"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent" />
+            </RadioGroup>
+
+            <!-- OpenAI sub-section (shown when OpenAI selected) -->
+            <LinearLayout
+                android:id="@+id/section_openai"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="OpenAI API Key"
+                        android:textSize="13sp"
+                        android:textColor="@color/text_secondary" />
+
+                    <TextView
+                        android:id="@+id/tv_openai_balance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:textColor="@color/accent" />
+                </LinearLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    app:endIconMode="password_toggle">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_openai_key"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="sk-..."
+                        android:inputType="textPassword"
+                        android:fontFamily="monospace" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_openai_model"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    android:hint="Model"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/actv_openai_model"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:focusable="false"
+                        android:focusableInTouchMode="false"
+                        android:inputType="none"
+                        android:textColor="@color/text_primary" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- Kokoro sub-section -->
+            <LinearLayout
+                android:id="@+id/section_kokoro"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Kokoro Model"
+                        android:textSize="13sp"
+                        android:textColor="@color/text_secondary" />
+
+                    <TextView
+                        android:id="@+id/tv_kokoro_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:textColor="@color/accent" />
+                </LinearLayout>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_kokoro"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:indeterminate="false"
+                    android:visibility="gone"
+                    app:indicatorColor="@color/accent"
+                    app:trackColor="@color/stroke" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_kokoro_download"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:text="Download model (~350 MB)"
+                    android:visibility="gone" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_kokoro_voice"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:hint="Voice"
+                    android:visibility="gone">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/actv_kokoro_voice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none"
+                        android:focusable="false" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </LinearLayout>
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/stroke"
-            android:layout_marginBottom="20dp" />
+            android:background="@color/stroke" />
 
-        <!-- ── ElevenLabs section ─────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- NARRATION PROMPTS section (collapsed by default)        -->
+        <!-- ═══════════════════════════════════════════════════════ -->
         <LinearLayout
+            android:id="@+id/header_prompts"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="10dp">
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="ELEVENLABS"
+                android:text="NARRATION PROMPTS"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:textAllCaps="true"
                 android:letterSpacing="0.1" />
 
             <TextView
-                android:id="@+id/tv_elevenlabs_balance"
+                android:id="@+id/ind_prompts"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Loading..."
-                android:textSize="12sp"
-                android:textColor="@color/accent" />
-        </LinearLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            app:endIconMode="password_toggle">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_elevenlabs_key"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="sk_..."
-                android:inputType="textPassword"
-                android:fontFamily="monospace" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- ── Divider ─────────────────────────────────────── -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/stroke"
-            android:layout_marginBottom="20dp"
-            android:layout_marginTop="12dp" />
-
-        <!-- ── Kokoro section ─────────────────────────────── -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="10dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="KOKORO (ON-DEVICE)"
-                android:textSize="11sp"
+                android:text="▶"
                 android:textColor="@color/text_secondary"
-                android:textAllCaps="true"
-                android:letterSpacing="0.1" />
-
-            <TextView
-                android:id="@+id/tv_kokoro_status"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="@color/accent" />
+                android:textSize="12sp" />
         </LinearLayout>
 
-        <com.google.android.material.progressindicator.LinearProgressIndicator
-            android:id="@+id/progress_kokoro"
+        <LinearLayout
+            android:id="@+id/body_prompts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:indeterminate="false"
-            android:visibility="gone"
-            app:indicatorColor="@color/accent"
-            app:trackColor="@color/stroke" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_kokoro_download"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Download model (~350 MB)"
-            android:visibility="gone" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_kokoro_voice"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="Voice"
+            android:orientation="vertical"
+            android:paddingBottom="16dp"
             android:visibility="gone">
 
-            <AutoCompleteTextView
-                android:id="@+id/actv_kokoro_voice"
+            <!-- System Prompt -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="none"
-                android:focusable="false" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
 
-        </com.google.android.material.textfield.TextInputLayout>
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="System Prompt"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_clear_history"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="end"
-            android:layout_marginTop="8dp"
-            android:text="Clear History"
-            android:textColor="@color/stop_color" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_restore_system"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Restore Default"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+            </LinearLayout>
 
-        <!-- ── Divider ─────────────────────────────────────── -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_system_prompt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textMultiLine"
+                    android:minLines="5"
+                    android:maxLines="10"
+                    android:scrollbars="vertical"
+                    android:gravity="top|start"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- User Prompt -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="4dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="User Prompt"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_restore_user"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Restore Default"
+                    android:textSize="12sp"
+                    android:minWidth="0dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Variables: {location}  {poi}"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="6dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_user_prompt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textMultiLine"
+                    android:minLines="5"
+                    android:maxLines="10"
+                    android:scrollbars="vertical"
+                    android:gravity="top|start"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/stroke"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="20dp" />
+            android:background="@color/stroke" />
 
-        <!-- ── Diagnostics section ────────────────────────── -->
-        <TextView
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- DIAGNOSTICS section (collapsed by default)              -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:id="@+id/header_diag"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="DIAGNOSTICS"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/ind_diag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▶"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/body_diag"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="DIAGNOSTICS"
-            android:textSize="11sp"
-            android:textColor="@color/text_secondary"
-            android:textAllCaps="true"
-            android:letterSpacing="0.1"
-            android:layout_marginBottom="12dp" />
+            android:orientation="vertical"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_copy_logs"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="Copy TTS Logs" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_clear_history"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Clear Session History"
+                android:textColor="@color/stop_color" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_export_logs"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Export Full Log File" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_copy_logs"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp"
+                android:text="Copy TTS Logs" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_export_logs"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Export Full Log File" />
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>
