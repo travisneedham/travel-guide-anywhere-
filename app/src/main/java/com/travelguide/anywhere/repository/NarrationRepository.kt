@@ -1,5 +1,6 @@
 package com.travelguide.anywhere.repository
 
+import android.content.SharedPreferences
 import android.location.Location
 import android.util.Log
 import com.travelguide.anywhere.data.model.PlaceOfInterest
@@ -12,7 +13,8 @@ import javax.inject.Singleton
 
 @Singleton
 class NarrationRepository @Inject constructor(
-    private val claudeApi: ClaudeApiService
+    private val claudeApi: ClaudeApiService,
+    private val prefs: SharedPreferences
 ) {
 
     suspend fun generateNarration(
@@ -31,16 +33,15 @@ class NarrationRepository @Inject constructor(
 
         val locationStr = "%.4f°N, %.4f°W".format(location.latitude, Math.abs(location.longitude))
 
-        val userMessage = buildString {
-            append("I'm currently at coordinates $locationStr. ")
-            append("The closest interesting place to me that I haven't heard about yet is:\n\n")
-            append(poiLine)
-            append("\n\nPlease give me an engaging audio narration about this specific place. ")
-            append("Start naturally, as if you're right here with me, continuing our tour together.")
-        }
+        val systemPrompt = prefs.getString(PREF_SYSTEM_PROMPT, "")
+            ?.takeIf { it.isNotBlank() } ?: ClaudeApiService.SYSTEM_PROMPT
+
+        val userMessage = (prefs.getString(PREF_USER_PROMPT, "")?.takeIf { it.isNotBlank() } ?: DEFAULT_USER_PROMPT)
+            .replace("{location}", locationStr)
+            .replace("{poi}", poiLine)
 
         val request = ClaudeRequest(
-            system = ClaudeApiService.SYSTEM_PROMPT,
+            system = systemPrompt,
             messages = listOf(ClaudeMessage(role = "user", content = userMessage))
         )
 
@@ -68,5 +69,13 @@ class NarrationRepository @Inject constructor(
 
     companion object {
         private const val TAG = "NarrationRepository"
+        const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
+        const val PREF_USER_PROMPT = "pref_user_prompt"
+        const val DEFAULT_USER_PROMPT =
+            "I'm currently at coordinates {location}. " +
+            "The closest interesting place to me that I haven't heard about yet is:\n\n" +
+            "{poi}\n\n" +
+            "Please give me an engaging audio narration about this specific place. " +
+            "Start naturally, as if you're right here with me, continuing our tour together."
     }
 }

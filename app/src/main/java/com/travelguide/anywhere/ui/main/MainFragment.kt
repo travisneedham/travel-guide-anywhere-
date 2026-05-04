@@ -34,9 +34,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
+import com.travelguide.anywhere.repository.NarrationRepository
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,7 +52,6 @@ class MainFragment : Fragment() {
     private var savedRangeSliderValue = 4f
 
     @Inject lateinit var prefs: SharedPreferences
-    @Inject lateinit var okHttpClient: OkHttpClient
     @Inject lateinit var kokoroModelManager: KokoroModelManager
 
     override fun onCreateView(
@@ -292,24 +289,53 @@ class MainFragment : Fragment() {
         val dialogView = LayoutInflater.from(requireContext())
             .inflate(R.layout.dialog_settings, null)
 
-        // ── Wire up existing fields ──────────────────────────────
+        // ── Collapsible sections ──────────────────────────────────
+        val bodyApi = dialogView.findViewById<View>(R.id.body_api)
+        val bodyVoice = dialogView.findViewById<View>(R.id.body_voice)
+        val bodyPrompts = dialogView.findViewById<View>(R.id.body_prompts)
+        val bodyDiag = dialogView.findViewById<View>(R.id.body_diag)
+        val indApi = dialogView.findViewById<TextView>(R.id.ind_api)
+        val indVoice = dialogView.findViewById<TextView>(R.id.ind_voice)
+        val indPrompts = dialogView.findViewById<TextView>(R.id.ind_prompts)
+        val indDiag = dialogView.findViewById<TextView>(R.id.ind_diag)
+
+        fun toggleSection(body: View, indicator: TextView) {
+            val expanding = body.visibility == View.GONE
+            body.visibility = if (expanding) View.VISIBLE else View.GONE
+            indicator.text = if (expanding) "▼" else "▶"
+        }
+        dialogView.findViewById<View>(R.id.header_api).setOnClickListener { toggleSection(bodyApi, indApi) }
+        dialogView.findViewById<View>(R.id.header_voice).setOnClickListener { toggleSection(bodyVoice, indVoice) }
+        dialogView.findViewById<View>(R.id.header_prompts).setOnClickListener { toggleSection(bodyPrompts, indPrompts) }
+        dialogView.findViewById<View>(R.id.header_diag).setOnClickListener { toggleSection(bodyDiag, indDiag) }
+
+        // ── API Key ───────────────────────────────────────────────
         val apiKeyInput = dialogView.findViewById<TextInputEditText>(R.id.et_api_key)
-        val speechRateSlider = dialogView.findViewById<Slider>(R.id.slider_speech_rate)
         apiKeyInput.setText(prefs.getString(PREF_API_KEY, BuildConfig.ANTHROPIC_API_KEY))
+
+        // ── Speech rate ───────────────────────────────────────────
+        val speechRateSlider = dialogView.findViewById<Slider>(R.id.slider_speech_rate)
         speechRateSlider.value = prefs.getFloat(PREF_SPEECH_RATE, 0.95f)
 
-        // ── TTS provider radio ────────────────────────────────────
+        // ── TTS provider radio + sub-sections ─────────────────────
         val rgProvider = dialogView.findViewById<RadioGroup>(R.id.rg_tts_provider)
         val rbAndroid = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_android)
         val rbOpenAi = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_openai)
-        val rbElevenLabs = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_elevenlabs)
         val rbKokoro = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_kokoro)
+        val sectionOpenAi = dialogView.findViewById<View>(R.id.section_openai)
+        val sectionKokoro = dialogView.findViewById<View>(R.id.section_kokoro)
+
+        fun applyProviderVisibility() {
+            sectionOpenAi.visibility = if (rbOpenAi.isChecked) View.VISIBLE else View.GONE
+            sectionKokoro.visibility = if (rbKokoro.isChecked) View.VISIBLE else View.GONE
+        }
         when (prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android")) {
             "openai" -> rbOpenAi.isChecked = true
-            "elevenlabs" -> rbElevenLabs.isChecked = true
             "kokoro" -> rbKokoro.isChecked = true
             else -> rbAndroid.isChecked = true
         }
+        applyProviderVisibility()
+        rgProvider.setOnCheckedChangeListener { _, _ -> applyProviderVisibility() }
 
         // ── OpenAI fields ─────────────────────────────────────────
         val openAiKeyInput = dialogView.findViewById<TextInputEditText>(R.id.et_openai_key)
@@ -322,52 +348,21 @@ class MainFragment : Fragment() {
         val savedModel = prefs.getString(TourGuideService.PREF_OPENAI_TTS_MODEL, "tts-1-hd") ?: "tts-1-hd"
         actvModel.setText(if (savedModel == "tts-1") openAiModels[0] else openAiModels[1], false)
 
-        // ── ElevenLabs fields ─────────────────────────────────────
-        val elevenLabsKeyInput = dialogView.findViewById<TextInputEditText>(R.id.et_elevenlabs_key)
-        elevenLabsKeyInput.setText(prefs.getString(TourGuideService.PREF_ELEVENLABS_KEY, ""))
-
-        // ── Balance labels (fetch async when dialog opens) ────────
         val tvOpenAiBalance = dialogView.findViewById<TextView>(R.id.tv_openai_balance)
-        val tvElevenLabsBalance = dialogView.findViewById<TextView>(R.id.tv_elevenlabs_balance)
+        tvOpenAiBalance.text = if ((prefs.getString(TourGuideService.PREF_OPENAI_TTS_KEY, "") ?: "").isBlank())
+            "No key saved" else "See platform.openai.com"
 
-        val storedOpenAiKey = prefs.getString(TourGuideService.PREF_OPENAI_TTS_KEY, "") ?: ""
-        val storedElKey = prefs.getString(TourGuideService.PREF_ELEVENLABS_KEY, "") ?: ""
-
-        tvOpenAiBalance.text = if (storedOpenAiKey.isBlank()) "No key saved" else "See platform.openai.com"
-        if (storedElKey.isBlank()) {
-            tvElevenLabsBalance.text = "No key saved"
-        } else {
-            tvElevenLabsBalance.text = "Loading…"
-            lifecycleScope.launch {
-                tvElevenLabsBalance.text = fetchElevenLabsBalance(storedElKey)
-            }
-        }
-
-        // ── Clear History (lives in content view so Save/Cancel always stay on one row) ──
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_clear_history)
-            .setOnClickListener {
-                viewModel.clearHistory()
-                Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
-            }
-
-        // ── Kokoro voice picker ───────────────────────────────────
+        // ── Kokoro fields ─────────────────────────────────────────
+        val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
+        val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
+        val btnKokoroDownload = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_kokoro_download)
         val tilKokoroVoice = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.til_kokoro_voice)
         val actvKokoroVoice = dialogView.findViewById<AutoCompleteTextView>(R.id.actv_kokoro_voice)
+
         val kokoroVoiceAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, KOKORO_VOICES.map { it.first })
         actvKokoroVoice.setAdapter(kokoroVoiceAdapter)
         val savedVoiceSid = prefs.getInt(PREF_KOKORO_VOICE_SID, 0)
         actvKokoroVoice.setText(KOKORO_VOICES.getOrElse(savedVoiceSid) { KOKORO_VOICES[0] }.first, false)
-
-        fun updateKokoroVoiceVisibility() {
-            tilKokoroVoice.visibility = if (rbKokoro.isChecked && kokoroModelManager.isReady) View.VISIBLE else View.GONE
-        }
-        updateKokoroVoiceVisibility()
-        rgProvider.setOnCheckedChangeListener { _, _ -> updateKokoroVoiceVisibility() }
-
-        // ── Kokoro download section ───────────────────────────────
-        val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
-        val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
-        val btnKokoroDownload = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_kokoro_download)
 
         fun applyKokoroState(state: KokoroModelManager.DownloadState) {
             when (state) {
@@ -377,6 +372,7 @@ class MainFragment : Fragment() {
                     btnKokoroDownload.visibility = View.VISIBLE
                     btnKokoroDownload.text = "Download model (~350 MB)"
                     btnKokoroDownload.isEnabled = true
+                    tilKokoroVoice.visibility = View.GONE
                 }
                 is KokoroModelManager.DownloadState.Downloading -> {
                     val pct = (state.progress * 100).toInt()
@@ -385,18 +381,20 @@ class MainFragment : Fragment() {
                     progressKokoro.isIndeterminate = false
                     progressKokoro.progress = pct
                     btnKokoroDownload.visibility = View.GONE
+                    tilKokoroVoice.visibility = View.GONE
                 }
                 is KokoroModelManager.DownloadState.Extracting -> {
                     tvKokoroStatus.text = "Extracting files… (2–3 min)"
                     progressKokoro.visibility = View.VISIBLE
                     progressKokoro.isIndeterminate = true
                     btnKokoroDownload.visibility = View.GONE
+                    tilKokoroVoice.visibility = View.GONE
                 }
                 is KokoroModelManager.DownloadState.Ready -> {
                     tvKokoroStatus.text = "Ready"
                     progressKokoro.visibility = View.GONE
                     btnKokoroDownload.visibility = View.GONE
-                    updateKokoroVoiceVisibility()
+                    tilKokoroVoice.visibility = View.VISIBLE
                 }
                 is KokoroModelManager.DownloadState.Error -> {
                     tvKokoroStatus.text = "Error: ${state.message}"
@@ -404,22 +402,43 @@ class MainFragment : Fragment() {
                     btnKokoroDownload.visibility = View.VISIBLE
                     btnKokoroDownload.text = "Retry download"
                     btnKokoroDownload.isEnabled = true
+                    tilKokoroVoice.visibility = View.GONE
                 }
             }
         }
-
         applyKokoroState(kokoroModelManager.state.value)
-
         btnKokoroDownload.setOnClickListener {
             btnKokoroDownload.isEnabled = false
             KokoroDownloadService.start(requireContext())
         }
-
         val kokoroStateJob = lifecycleScope.launch {
             kokoroModelManager.state.collect { applyKokoroState(it) }
         }
 
-        // ── Diagnostics buttons ───────────────────────────────────
+        // ── Narration Prompts ─────────────────────────────────────
+        val etSystemPrompt = dialogView.findViewById<TextInputEditText>(R.id.et_system_prompt)
+        val etUserPrompt = dialogView.findViewById<TextInputEditText>(R.id.et_user_prompt)
+        etSystemPrompt.setText(
+            prefs.getString(NarrationRepository.PREF_SYSTEM_PROMPT, "")
+                ?.takeIf { it.isNotBlank() } ?: com.travelguide.anywhere.data.remote.ClaudeApiService.SYSTEM_PROMPT
+        )
+        etUserPrompt.setText(
+            prefs.getString(NarrationRepository.PREF_USER_PROMPT, "")
+                ?.takeIf { it.isNotBlank() } ?: NarrationRepository.DEFAULT_USER_PROMPT
+        )
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_restore_system)
+            .setOnClickListener {
+                etSystemPrompt.setText(com.travelguide.anywhere.data.remote.ClaudeApiService.SYSTEM_PROMPT)
+            }
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_restore_user)
+            .setOnClickListener { etUserPrompt.setText(NarrationRepository.DEFAULT_USER_PROMPT) }
+
+        // ── Diagnostics ───────────────────────────────────────────
+        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_clear_history)
+            .setOnClickListener {
+                viewModel.clearHistory()
+                Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
+            }
         dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_copy_logs)
             .setOnClickListener {
                 lifecycleScope.launch {
@@ -429,7 +448,6 @@ class MainFragment : Fragment() {
                     Toast.makeText(requireContext(), "TTS logs copied to clipboard", Toast.LENGTH_SHORT).show()
                 }
             }
-
         dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_export_logs)
             .setOnClickListener {
                 lifecycleScope.launch {
@@ -460,17 +478,16 @@ class MainFragment : Fragment() {
                 val rate = speechRateSlider.value
                 val provider = when (rgProvider.checkedRadioButtonId) {
                     R.id.rb_openai -> "openai"
-                    R.id.rb_elevenlabs -> "elevenlabs"
                     R.id.rb_kokoro -> "kokoro"
                     else -> "android"
                 }
                 val openAiKey = openAiKeyInput.text?.toString()?.trim() ?: ""
                 val openAiModel = if (actvModel.text.toString().startsWith("tts-1-hd")) "tts-1-hd" else "tts-1"
-                val elKey = elevenLabsKeyInput.text?.toString()?.trim() ?: ""
-
                 val kokoroVoiceSid = KOKORO_VOICES.indexOfFirst {
                     it.first == actvKokoroVoice.text.toString()
                 }.coerceAtLeast(0)
+                val systemPrompt = etSystemPrompt.text?.toString() ?: ""
+                val userPrompt = etUserPrompt.text?.toString() ?: ""
 
                 prefs.edit()
                     .putString(PREF_API_KEY, anthropicKey)
@@ -478,37 +495,15 @@ class MainFragment : Fragment() {
                     .putString(TourGuideService.PREF_TTS_PROVIDER, provider)
                     .putString(TourGuideService.PREF_OPENAI_TTS_KEY, openAiKey)
                     .putString(TourGuideService.PREF_OPENAI_TTS_MODEL, openAiModel)
-                    .putString(TourGuideService.PREF_ELEVENLABS_KEY, elKey)
                     .putInt(PREF_KOKORO_VOICE_SID, kokoroVoiceSid)
+                    .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
+                    .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
                     .apply()
                 Toast.makeText(requireContext(), "Settings saved", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { kokoroStateJob.cancel() }
             .show()
-    }
-
-    private suspend fun fetchElevenLabsBalance(apiKey: String): String = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url("https://api.elevenlabs.io/v1/user/subscription")
-                .header("xi-api-key", apiKey)
-                .get()
-                .build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext "Balance unavailable"
-                val body = response.body?.string() ?: return@withContext "Balance unavailable"
-                val json = JSONObject(body)
-                val used = json.optInt("character_count", -1)
-                val limit = json.optInt("character_limit", -1)
-                if (used >= 0 && limit >= 0) {
-                    val remaining = limit - used
-                    "%,d / %,d chars left".format(remaining, limit)
-                } else "Balance unavailable"
-            }
-        } catch (e: Exception) {
-            "Balance unavailable"
-        }
     }
 
     // Filters the full logcat to just our TTS/service tags — avoids Android framework
