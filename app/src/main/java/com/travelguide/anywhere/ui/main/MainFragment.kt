@@ -1,26 +1,19 @@
 package com.travelguide.anywhere.ui.main
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.AutoCompleteTextView
-import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.commit
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
@@ -31,10 +24,7 @@ import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.travelguide.anywhere.repository.NarrationRepository
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -133,7 +123,12 @@ class MainFragment : Fragment() {
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
         binding.btnPause.setOnClickListener { viewModel.pauseOrResume() }
         binding.btnSkip.setOnClickListener { viewModel.skip() }
-        binding.btnSettings.setOnClickListener { showSettingsDialog() }
+        binding.btnSettings.setOnClickListener {
+            parentFragmentManager.commit {
+                replace(R.id.fragment_container, SettingsFragment())
+                addToBackStack(null)
+            }
+        }
     }
 
     private fun checkKokoroOnStartup() {
@@ -283,264 +278,6 @@ class MainFragment : Fragment() {
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    private fun showSettingsDialog() {
-        val dialogView = LayoutInflater.from(requireContext())
-            .inflate(R.layout.dialog_settings, null)
-
-        // ── Collapsible sections ──────────────────────────────────
-        val bodyApi = dialogView.findViewById<View>(R.id.body_api)
-        val bodyVoice = dialogView.findViewById<View>(R.id.body_voice)
-        val bodyPrompts = dialogView.findViewById<View>(R.id.body_prompts)
-        val bodyDiag = dialogView.findViewById<View>(R.id.body_diag)
-        val indApi = dialogView.findViewById<TextView>(R.id.ind_api)
-        val indVoice = dialogView.findViewById<TextView>(R.id.ind_voice)
-        val indPrompts = dialogView.findViewById<TextView>(R.id.ind_prompts)
-        val indDiag = dialogView.findViewById<TextView>(R.id.ind_diag)
-
-        fun toggleSection(body: View, indicator: TextView) {
-            val expanding = body.visibility == View.GONE
-            body.visibility = if (expanding) View.VISIBLE else View.GONE
-            indicator.text = if (expanding) "▼" else "▶"
-        }
-        dialogView.findViewById<View>(R.id.header_api).setOnClickListener { toggleSection(bodyApi, indApi) }
-        dialogView.findViewById<View>(R.id.header_voice).setOnClickListener { toggleSection(bodyVoice, indVoice) }
-        dialogView.findViewById<View>(R.id.header_prompts).setOnClickListener { toggleSection(bodyPrompts, indPrompts) }
-        dialogView.findViewById<View>(R.id.header_diag).setOnClickListener { toggleSection(bodyDiag, indDiag) }
-
-        // ── API Key ───────────────────────────────────────────────
-        val apiKeyInput = dialogView.findViewById<TextInputEditText>(R.id.et_api_key)
-        apiKeyInput.setText(prefs.getString(PREF_API_KEY, BuildConfig.ANTHROPIC_API_KEY))
-
-        // ── Speech rate ───────────────────────────────────────────
-        val speechRateSlider = dialogView.findViewById<Slider>(R.id.slider_speech_rate)
-        speechRateSlider.value = prefs.getFloat(PREF_SPEECH_RATE, 0.95f)
-
-        // ── TTS provider radio + sub-sections ─────────────────────
-        val rgProvider = dialogView.findViewById<RadioGroup>(R.id.rg_tts_provider)
-        val rbAndroid = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_android)
-        val rbOpenAi = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_openai)
-        val rbKokoro = dialogView.findViewById<android.widget.RadioButton>(R.id.rb_kokoro)
-        val sectionOpenAi = dialogView.findViewById<View>(R.id.section_openai)
-        val sectionKokoro = dialogView.findViewById<View>(R.id.section_kokoro)
-
-        fun applyProviderVisibility() {
-            sectionOpenAi.visibility = if (rbOpenAi.isChecked) View.VISIBLE else View.GONE
-            sectionKokoro.visibility = if (rbKokoro.isChecked) View.VISIBLE else View.GONE
-        }
-        when (prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android")) {
-            "openai" -> rbOpenAi.isChecked = true
-            "kokoro" -> rbKokoro.isChecked = true
-            else -> rbAndroid.isChecked = true
-        }
-        applyProviderVisibility()
-        rgProvider.setOnCheckedChangeListener { _, _ -> applyProviderVisibility() }
-
-        // ── OpenAI fields ─────────────────────────────────────────
-        val openAiKeyInput = dialogView.findViewById<TextInputEditText>(R.id.et_openai_key)
-        openAiKeyInput.setText(prefs.getString(TourGuideService.PREF_OPENAI_TTS_KEY, ""))
-
-        val openAiModels = listOf("tts-1  (faster, standard quality)", "tts-1-hd  (slower, higher quality)")
-        val modelAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, openAiModels)
-        val actvModel = dialogView.findViewById<AutoCompleteTextView>(R.id.actv_openai_model)
-        actvModel.setAdapter(modelAdapter)
-        val savedModel = prefs.getString(TourGuideService.PREF_OPENAI_TTS_MODEL, "tts-1-hd") ?: "tts-1-hd"
-        actvModel.setText(if (savedModel == "tts-1") openAiModels[0] else openAiModels[1], false)
-
-        val tvOpenAiBalance = dialogView.findViewById<TextView>(R.id.tv_openai_balance)
-        tvOpenAiBalance.text = if ((prefs.getString(TourGuideService.PREF_OPENAI_TTS_KEY, "") ?: "").isBlank())
-            "No key saved" else "See platform.openai.com"
-
-        // ── Kokoro fields ─────────────────────────────────────────
-        val tvKokoroStatus = dialogView.findViewById<TextView>(R.id.tv_kokoro_status)
-        val progressKokoro = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progress_kokoro)
-        val btnKokoroDownload = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_kokoro_download)
-        val tilKokoroVoice = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.til_kokoro_voice)
-        val actvKokoroVoice = dialogView.findViewById<AutoCompleteTextView>(R.id.actv_kokoro_voice)
-
-        val kokoroVoiceAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, KOKORO_VOICES.map { it.first })
-        actvKokoroVoice.setAdapter(kokoroVoiceAdapter)
-        val savedVoiceSid = prefs.getInt(PREF_KOKORO_VOICE_SID, 0)
-        actvKokoroVoice.setText(KOKORO_VOICES.getOrElse(savedVoiceSid) { KOKORO_VOICES[0] }.first, false)
-
-        fun applyKokoroState(state: KokoroModelManager.DownloadState) {
-            when (state) {
-                is KokoroModelManager.DownloadState.NotDownloaded -> {
-                    tvKokoroStatus.text = "Not downloaded"
-                    progressKokoro.visibility = View.GONE
-                    btnKokoroDownload.visibility = View.VISIBLE
-                    btnKokoroDownload.text = "Download model (~350 MB)"
-                    btnKokoroDownload.isEnabled = true
-                    tilKokoroVoice.visibility = View.GONE
-                }
-                is KokoroModelManager.DownloadState.Downloading -> {
-                    val pct = (state.progress * 100).toInt()
-                    tvKokoroStatus.text = "Downloading… $pct%"
-                    progressKokoro.visibility = View.VISIBLE
-                    progressKokoro.isIndeterminate = false
-                    progressKokoro.progress = pct
-                    btnKokoroDownload.visibility = View.GONE
-                    tilKokoroVoice.visibility = View.GONE
-                }
-                is KokoroModelManager.DownloadState.Extracting -> {
-                    tvKokoroStatus.text = "Extracting files… (2–3 min)"
-                    progressKokoro.visibility = View.VISIBLE
-                    progressKokoro.isIndeterminate = true
-                    btnKokoroDownload.visibility = View.GONE
-                    tilKokoroVoice.visibility = View.GONE
-                }
-                is KokoroModelManager.DownloadState.Ready -> {
-                    tvKokoroStatus.text = "Ready"
-                    progressKokoro.visibility = View.GONE
-                    btnKokoroDownload.visibility = View.GONE
-                    tilKokoroVoice.visibility = View.VISIBLE
-                }
-                is KokoroModelManager.DownloadState.Error -> {
-                    tvKokoroStatus.text = "Error: ${state.message}"
-                    progressKokoro.visibility = View.GONE
-                    btnKokoroDownload.visibility = View.VISIBLE
-                    btnKokoroDownload.text = "Retry download"
-                    btnKokoroDownload.isEnabled = true
-                    tilKokoroVoice.visibility = View.GONE
-                }
-            }
-        }
-        applyKokoroState(kokoroModelManager.state.value)
-        btnKokoroDownload.setOnClickListener {
-            btnKokoroDownload.isEnabled = false
-            KokoroDownloadService.start(requireContext())
-        }
-        val kokoroStateJob = lifecycleScope.launch {
-            kokoroModelManager.state.collect { applyKokoroState(it) }
-        }
-
-        // ── Narration Prompts ─────────────────────────────────────
-        val etSystemPrompt = dialogView.findViewById<TextInputEditText>(R.id.et_system_prompt)
-        val etUserPrompt = dialogView.findViewById<TextInputEditText>(R.id.et_user_prompt)
-        etSystemPrompt.setText(
-            prefs.getString(NarrationRepository.PREF_SYSTEM_PROMPT, "")
-                ?.takeIf { it.isNotBlank() } ?: com.travelguide.anywhere.data.remote.ClaudeApiService.SYSTEM_PROMPT
-        )
-        etUserPrompt.setText(
-            prefs.getString(NarrationRepository.PREF_USER_PROMPT, "")
-                ?.takeIf { it.isNotBlank() } ?: NarrationRepository.DEFAULT_USER_PROMPT
-        )
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_restore_system)
-            .setOnClickListener {
-                etSystemPrompt.setText(com.travelguide.anywhere.data.remote.ClaudeApiService.SYSTEM_PROMPT)
-            }
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_restore_user)
-            .setOnClickListener { etUserPrompt.setText(NarrationRepository.DEFAULT_USER_PROMPT) }
-
-        // ── Diagnostics ───────────────────────────────────────────
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_clear_history)
-            .setOnClickListener {
-                viewModel.clearHistory()
-                Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
-            }
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_copy_logs)
-            .setOnClickListener {
-                lifecycleScope.launch {
-                    val logs = readTtsLogs()
-                    val cm = requireContext().getSystemService(ClipboardManager::class.java)
-                    cm.setPrimaryClip(ClipData.newPlainText("travel_guide_logs", logs))
-                    Toast.makeText(requireContext(), "TTS logs copied to clipboard", Toast.LENGTH_SHORT).show()
-                }
-            }
-        dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_export_logs)
-            .setOnClickListener {
-                lifecycleScope.launch {
-                    val logs = readLogcat(maxLines = null)
-                    val logFile = File(requireContext().cacheDir, "travel_guide_log.txt")
-                    logFile.writeText(logs)
-                    val uri = FileProvider.getUriForFile(
-                        requireContext(),
-                        "${requireContext().packageName}.fileprovider",
-                        logFile
-                    )
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Log")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(Intent.createChooser(shareIntent, "Export Log File"))
-                }
-            }
-
-        // ── Build dialog ──────────────────────────────────────────
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(getString(R.string.settings_title))
-            .setView(dialogView)
-            .setPositiveButton("Save") { _, _ ->
-                val anthropicKey = apiKeyInput.text?.toString()?.trim() ?: ""
-                val rate = speechRateSlider.value
-                val provider = when (rgProvider.checkedRadioButtonId) {
-                    R.id.rb_openai -> "openai"
-                    R.id.rb_kokoro -> "kokoro"
-                    else -> "android"
-                }
-                val openAiKey = openAiKeyInput.text?.toString()?.trim() ?: ""
-                val openAiModel = if (actvModel.text.toString().startsWith("tts-1-hd")) "tts-1-hd" else "tts-1"
-                val kokoroVoiceSid = KOKORO_VOICES.indexOfFirst {
-                    it.first == actvKokoroVoice.text.toString()
-                }.coerceAtLeast(0)
-                val systemPrompt = etSystemPrompt.text?.toString() ?: ""
-                val userPrompt = etUserPrompt.text?.toString() ?: ""
-
-                prefs.edit()
-                    .putString(PREF_API_KEY, anthropicKey)
-                    .putFloat(PREF_SPEECH_RATE, rate)
-                    .putString(TourGuideService.PREF_TTS_PROVIDER, provider)
-                    .putString(TourGuideService.PREF_OPENAI_TTS_KEY, openAiKey)
-                    .putString(TourGuideService.PREF_OPENAI_TTS_MODEL, openAiModel)
-                    .putInt(PREF_KOKORO_VOICE_SID, kokoroVoiceSid)
-                    .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
-                    .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
-                    .apply()
-                Toast.makeText(requireContext(), "Settings saved", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .setOnDismissListener { kokoroStateJob.cancel() }
-            .show()
-    }
-
-    // Filters the full logcat to just our TTS/service tags — avoids Android framework
-    // noise swamping the output when using the 30-line cap.
-    private suspend fun readTtsLogs(): String = withContext(Dispatchers.IO) {
-        val interestingTags = setOf(
-            "KokoroTtsEngine", "TourGuideService", "NarrationRepository",
-            "PoiRepository", "KokoroModelManager", "AndroidTtsEngine"
-        )
-        try {
-            val pid = android.os.Process.myPid().toString()
-            val process = Runtime.getRuntime().exec(
-                arrayOf("logcat", "-d", "--pid", pid, "-v", "time")
-            )
-            process.inputStream.bufferedReader()
-                .lineSequence()
-                .filter { line -> interestingTags.any { line.contains(it) } }
-                .joinToString("\n")
-                .ifBlank { "(no TTS logs found — run a tour first)" }
-        } catch (e: Exception) {
-            "Error reading logcat: ${e.message}"
-        }
-    }
-
-    private suspend fun readLogcat(maxLines: Int?): String = withContext(Dispatchers.IO) {
-        val pid = android.os.Process.myPid().toString()
-        val args = if (maxLines != null) {
-            arrayOf("logcat", "-d", "-t", maxLines.toString(), "--pid", pid)
-        } else {
-            arrayOf("logcat", "-d", "--pid", pid)
-        }
-        try {
-            val process = Runtime.getRuntime().exec(args)
-            process.inputStream.bufferedReader().readText().ifBlank { "(no log output found)" }
-        } catch (e: Exception) {
-            "Error reading logcat: ${e.message}"
-        }
     }
 
     override fun onDestroyView() {
