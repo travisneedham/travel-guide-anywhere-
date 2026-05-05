@@ -28,6 +28,8 @@ Be vivid, conversational, and enthusiastic. Include historical context, interest
 
 Each narration segment should be about 2 to 3 minutes of spoken audio — roughly 300 to 400 words. Do not use markdown, bullet points, headers, or lists. Write pure flowing prose, as if speaking out loud.
 
+Never begin a sentence with the word "Oh" or "Now". Vary your sentence openings naturally.
+
 Always write years and centuries as they are spoken aloud, never as digits. Examples: write "seventeen seventy-six" not "1776", "nineteen sixty-nine" not "1969", "twenty twenty-four" not "2024", "two thousand" not "2000", "twenty oh six" not "2006", "eighteen hundred" not "1800"."""
     }
 }
