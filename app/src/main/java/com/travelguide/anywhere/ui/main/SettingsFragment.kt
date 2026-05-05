@@ -23,8 +23,15 @@ import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
+import com.k2fsa.sherpa.onnx.OfflineTts
+import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.travelguide.anywhere.service.KokoroTtsEngine
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -40,6 +47,11 @@ class SettingsFragment : Fragment() {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
+
+    // Voice preview — single OfflineTts instance shared across all previews.
+    private var previewTts: OfflineTts? = null
+    private var previewJob: Job? = null
+    private var previewPlayer: android.media.MediaPlayer? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -121,6 +133,10 @@ class SettingsFragment : Fragment() {
         binding.actvKokoroVoice.setText(
             MainFragment.KOKORO_VOICES.getOrElse(savedSid) { MainFragment.KOKORO_VOICES[0] }.first, false
         )
+        binding.actvKokoroVoice.setOnItemClickListener { _, _, position, _ ->
+            val entry = MainFragment.KOKORO_VOICES.getOrNull(position) ?: return@setOnItemClickListener
+            previewVoice(sid = entry.second, voiceName = entry.first.substringBefore(" "))
+        }
         setupKokoroDownload()
     }
 
@@ -310,8 +326,57 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun previewVoice(sid: Int, voiceName: String) {
+        if (!kokoroModelManager.isReady) return
+        previewJob?.cancel()
+        previewPlayer?.runCatching { stop() }
+        previewPlayer?.release()
+        previewPlayer = null
+
+        val text = KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE.format(voiceName)
+        previewJob = viewLifecycleOwner.lifecycleScope.launch {
+            // Lazily initialize one OfflineTts for all previews (always en-us — guide speaks English).
+            if (previewTts == null) {
+                val modelDir = kokoroModelManager.modelDir
+                previewTts = withContext(Dispatchers.IO) {
+                    OfflineTts(config = OfflineTtsConfig(
+                        model = OfflineTtsModelConfig(
+                            kokoro = OfflineTtsKokoroModelConfig(
+                                model = File(modelDir, "model.onnx").absolutePath,
+                                voices = File(modelDir, "voices.bin").absolutePath,
+                                tokens = File(modelDir, "tokens.txt").absolutePath,
+                                dataDir = File(modelDir, "espeak-ng-data").absolutePath,
+                                lang = "en-us",
+                            ),
+                            numThreads = 1,
+                            debug = false,
+                            provider = "cpu",
+                        )
+                    ))
+                }
+            }
+            val tts = previewTts ?: return@launch
+            val wavFile = File(requireContext().cacheDir, "voice_preview.wav")
+            withContext(Dispatchers.IO) {
+                tts.generate(text = text, sid = sid, speed = 0.95f).save(wavFile.absolutePath)
+            }
+            if (!isActive) { wavFile.delete(); return@launch }
+            val mp = android.media.MediaPlayer().apply {
+                setDataSource(wavFile.absolutePath)
+                prepare()
+                setOnCompletionListener { wavFile.delete(); previewPlayer = null }
+            }
+            previewPlayer = mp
+            mp.start()
+        }
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        previewJob?.cancel()
+        previewPlayer?.runCatching { stop() }
+        previewPlayer?.release()
+        previewPlayer = null
         _binding = null
     }
 }

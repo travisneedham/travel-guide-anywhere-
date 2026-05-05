@@ -291,5 +291,9 @@ class KokoroTtsEngine(
         private const val TAG = "KokoroTtsEngine"
         const val DEFAULT_VOICE_ID = 0
         private const val MAX_CHUNK_CHARS = 400
+
+        /** Played when the user picks a new voice in Settings. %s = the voice's first name. */
+        const val VOICE_PREVIEW_TEMPLATE =
+            "Hello, my name is %s. It would be my pleasure to be your tour guide today."
     }
 }
