@@ -72,13 +72,14 @@ class PoiRepository @Inject constructor(
         ");\n" +
         "out body center;"
 
-    // Famous mode: filter to Wikipedia/Wikidata/heritage-tagged places and top tourism
-    // types so we get notable landmarks even at large radii. Sorted by fameScore.
+    // Famous mode: filter to Wikipedia/heritage-tagged places and top tourism types so we
+    // get notable landmarks even at large radii. Wikidata tag intentionally excluded —
+    // it's applied to millions of ordinary OSM objects and causes timeouts at large radii.
+    // Sorted by fameScore; wikidata presence on returned items still boosts their score.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:40];\n" +
         "(\n" +
         "  nwr[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"wikidata\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
