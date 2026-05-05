@@ -123,10 +123,12 @@ class TourGuideService : LifecycleService() {
                                else "Finding interesting places nearby..."
                 updateNotification(fetchMsg)
 
-                val pois = poiRepository.fetchPois(location, radiusMiles, famousMode)
-                    .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
+                val allPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
+                val pois = allPois.filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
+                Log.d(TAG, "fetchPois: ${allPois.size} total, ${pois.size} unmentioned (famousMode=$famousMode, radius=${radiusMiles}mi)")
 
                 if (pois.isEmpty()) {
+                    Log.d(TAG, "No new POIs — emitting NO_NEW_POIS (all mentioned: ${allPois.size > 0})")
                     emitState(TourState.NO_NEW_POIS)
                     updateNotification("Exploring... waiting for new places")
                     isGenerating = false

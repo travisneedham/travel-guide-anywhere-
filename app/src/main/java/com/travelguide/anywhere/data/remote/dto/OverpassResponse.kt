@@ -3,7 +3,8 @@ package com.travelguide.anywhere.data.remote.dto
 import com.google.gson.annotations.SerializedName
 
 data class OverpassResponse(
-    val elements: List<OverpassElement> = emptyList()
+    val elements: List<OverpassElement> = emptyList(),
+    val remark: String? = null
 )
 
 data class OverpassElement(

@@ -1,6 +1,7 @@
 package com.travelguide.anywhere.repository
 
 import android.location.Location
+import android.util.Log
 import com.google.gson.Gson
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.PoiType
@@ -19,6 +20,9 @@ class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gson: Gson
 ) {
+    companion object {
+        private const val TAG = "PoiRepository"
+    }
 
     suspend fun fetchPois(
         location: Location,
@@ -26,6 +30,9 @@ class PoiRepository @Inject constructor(
         famousMode: Boolean = false
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
+        val mode = if (famousMode) "famous" else "nearby"
+        Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMiles}mi (${radiusMeters}m)")
+
         val query = if (famousMode)
             buildFamousQuery(location.latitude, location.longitude, radiusMeters)
         else
@@ -51,14 +58,31 @@ class PoiRepository @Inject constructor(
 
         val overpassResponse = gson.fromJson(responseJson, OverpassResponse::class.java)
 
-        overpassResponse.elements
+        // Overpass signals a timeout/error via the "remark" field while returning empty elements.
+        if (!overpassResponse.remark.isNullOrBlank()) {
+            Log.w(TAG, "[$mode] Overpass remark: ${overpassResponse.remark}")
+            if (overpassResponse.elements.isEmpty()) {
+                throw Exception("Overpass query failed: ${overpassResponse.remark}")
+            }
+        }
+
+        val raw = overpassResponse.elements.size
+        val pois = overpassResponse.elements
             .filter { it.tags.containsKey("name") }
             .map { element -> element.toPlaceOfInterest(location) }
             .distinctBy { it.name }
-            .let { pois ->
-                if (famousMode) pois.sortedByDescending { it.fameScore }
-                else pois.sortedBy { it.distanceMeters }
+            .let { list ->
+                if (famousMode) list.sortedByDescending { it.fameScore }
+                else list.sortedBy { it.distanceMeters }
             }
+
+        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs")
+        if (famousMode && pois.isNotEmpty()) {
+            Log.d(TAG, "[famous] Top POIs by fame score: " +
+                pois.take(5).joinToString { "${it.name}(${it.fameScore})" })
+        }
+
+        pois
     }
 
     // Nearby mode: all interesting POI types sorted by distance (closest first).
@@ -72,14 +96,16 @@ class PoiRepository @Inject constructor(
         ");\n" +
         "out body center;"
 
-    // Famous mode: filter to Wikipedia/heritage-tagged places and top tourism types so we
-    // get notable landmarks even at large radii. Wikidata tag intentionally excluded —
-    // it's applied to millions of ordinary OSM objects and causes timeouts at large radii.
-    // Sorted by fameScore; wikidata presence on returned items still boosts their score.
+    // Famous mode: filter to well-known landmarks at large radii. Relations are excluded from
+    // the wikipedia filter because administrative boundary relations (cities, counties) also
+    // carry wikipedia tags and cause query timeouts. All other filters use nwr since they
+    // match far fewer elements. Sorted by fameScore; wikidata tag presence on returned items
+    // still boosts the score even though wikidata is not used as a query filter.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:40];\n" +
         "(\n" +
-        "  nwr[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
         "  nwr[\"name\"][\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
