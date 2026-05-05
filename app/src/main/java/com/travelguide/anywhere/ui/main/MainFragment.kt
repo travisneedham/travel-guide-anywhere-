@@ -225,7 +225,19 @@ class MainFragment : Fragment() {
             TourState.FETCHING -> getString(R.string.status_fetching)
             TourState.GENERATING -> getString(R.string.status_generating)
             TourState.LOADING_AUDIO -> getString(R.string.status_loading_audio)
-            TourState.SPEAKING -> getString(R.string.status_speaking)
+            TourState.SPEAKING -> {
+                val provider = prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android") ?: "android"
+                val voiceName = when (provider) {
+                    "kokoro" -> {
+                        val sid = prefs.getInt(PREF_KOKORO_VOICE_SID, DEFAULT_KOKORO_VOICE_SID)
+                        KOKORO_VOICES.getOrNull(sid)?.first?.substringBefore(" ") ?: ""
+                    }
+                    "openai" -> "OpenAI"
+                    else -> ""
+                }
+                if (voiceName.isNotBlank()) "${getString(R.string.status_speaking)} ($voiceName)"
+                else getString(R.string.status_speaking)
+            }
             TourState.PAUSED -> getString(R.string.status_paused)
             TourState.NO_NEW_POIS -> getString(R.string.status_no_new_pois)
             TourState.ERROR -> getString(R.string.status_error)
