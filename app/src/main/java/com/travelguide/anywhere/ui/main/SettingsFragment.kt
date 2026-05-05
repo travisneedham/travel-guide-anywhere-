@@ -74,13 +74,6 @@ class SettingsFragment : Fragment() {
         binding.toolbar.setNavigationOnClickListener {
             parentFragmentManager.popBackStack()
         }
-        binding.toolbar.setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_save) {
-                saveSettings()
-                parentFragmentManager.popBackStack()
-                true
-            } else false
-        }
     }
 
     private fun setupCollapsibleSections() {
@@ -129,14 +122,21 @@ class SettingsFragment : Fragment() {
             ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line,
                 MainFragment.KOKORO_VOICES.map { it.first })
         )
-        val savedSid = prefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, 0)
+        val savedSid = prefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, MainFragment.DEFAULT_KOKORO_VOICE_SID)
         binding.actvKokoroVoice.setText(
             MainFragment.KOKORO_VOICES.getOrElse(savedSid) { MainFragment.KOKORO_VOICES[0] }.first, false
         )
         binding.actvKokoroVoice.setOnItemClickListener { _, _, position, _ ->
             val entry = MainFragment.KOKORO_VOICES.getOrNull(position) ?: return@setOnItemClickListener
+            // Persist immediately so the voice sticks even without an explicit save.
+            prefs.edit().putInt(MainFragment.PREF_KOKORO_VOICE_SID, entry.second).apply()
             previewVoice(sid = entry.second, voiceName = entry.first.substringBefore(" "))
         }
+        // Kick off background preview caching if not already done.
+        kokoroModelManager.ensureVoicePreviews(
+            MainFragment.KOKORO_VOICES,
+            KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
+        )
         setupKokoroDownload()
     }
 
@@ -288,7 +288,6 @@ class SettingsFragment : Fragment() {
             .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
             .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
             .apply()
-        Toast.makeText(requireContext(), "Settings saved", Toast.LENGTH_SHORT).show()
     }
 
     private suspend fun readTtsLogs(): String = withContext(Dispatchers.IO) {
@@ -333,38 +332,52 @@ class SettingsFragment : Fragment() {
         previewPlayer?.release()
         previewPlayer = null
 
-        val text = KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE.format(voiceName)
         previewJob = viewLifecycleOwner.lifecycleScope.launch {
-            // Lazily initialize one OfflineTts for all previews (always en-us — guide speaks English).
-            if (previewTts == null) {
-                val modelDir = kokoroModelManager.modelDir
-                previewTts = withContext(Dispatchers.IO) {
-                    OfflineTts(config = OfflineTtsConfig(
-                        model = OfflineTtsModelConfig(
-                            kokoro = OfflineTtsKokoroModelConfig(
-                                model = File(modelDir, "model.onnx").absolutePath,
-                                voices = File(modelDir, "voices.bin").absolutePath,
-                                tokens = File(modelDir, "tokens.txt").absolutePath,
-                                dataDir = File(modelDir, "espeak-ng-data").absolutePath,
-                                lang = "en-us",
-                            ),
-                            numThreads = 1,
-                            debug = false,
-                            provider = "cpu",
-                        )
-                    ))
+            val cached = kokoroModelManager.voicePreviewFile(sid)
+            val wavToPlay: File
+
+            if (cached.exists()) {
+                // Zero-lag path: pre-generated WAV already on disk.
+                wavToPlay = cached
+            } else {
+                // Fallback: generate on demand then play.
+                val text = KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE.format(voiceName)
+                if (previewTts == null) {
+                    val modelDir = kokoroModelManager.modelDir
+                    previewTts = withContext(Dispatchers.IO) {
+                        OfflineTts(config = OfflineTtsConfig(
+                            model = OfflineTtsModelConfig(
+                                kokoro = OfflineTtsKokoroModelConfig(
+                                    model = File(modelDir, "model.onnx").absolutePath,
+                                    voices = File(modelDir, "voices.bin").absolutePath,
+                                    tokens = File(modelDir, "tokens.txt").absolutePath,
+                                    dataDir = File(modelDir, "espeak-ng-data").absolutePath,
+                                    lang = "en-us",
+                                ),
+                                numThreads = 1,
+                                debug = false,
+                                provider = "cpu",
+                            )
+                        ))
+                    }
                 }
+                val tts = previewTts ?: return@launch
+                val tmp = File(requireContext().cacheDir, "voice_preview_$sid.wav")
+                withContext(Dispatchers.IO) {
+                    tts.generate(text = text, sid = sid, speed = 0.95f).save(tmp.absolutePath)
+                }
+                if (!isActive) { tmp.delete(); return@launch }
+                wavToPlay = tmp
             }
-            val tts = previewTts ?: return@launch
-            val wavFile = File(requireContext().cacheDir, "voice_preview.wav")
-            withContext(Dispatchers.IO) {
-                tts.generate(text = text, sid = sid, speed = 0.95f).save(wavFile.absolutePath)
-            }
-            if (!isActive) { wavFile.delete(); return@launch }
+
             val mp = android.media.MediaPlayer().apply {
-                setDataSource(wavFile.absolutePath)
+                setDataSource(wavToPlay.absolutePath)
                 prepare()
-                setOnCompletionListener { wavFile.delete(); previewPlayer = null }
+                setOnCompletionListener {
+                    // Only delete if it was a temp file, not the persistent cache.
+                    if (wavToPlay != cached) wavToPlay.delete()
+                    previewPlayer = null
+                }
             }
             previewPlayer = mp
             mp.start()
@@ -372,11 +385,12 @@ class SettingsFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        super.onDestroyView()
+        saveSettings()
         previewJob?.cancel()
         previewPlayer?.runCatching { stop() }
         previewPlayer?.release()
         previewPlayer = null
+        super.onDestroyView()
         _binding = null
     }
 }

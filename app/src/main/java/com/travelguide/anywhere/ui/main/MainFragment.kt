@@ -132,7 +132,7 @@ class MainFragment : Fragment() {
     }
 
     private fun checkKokoroOnStartup() {
-        // If already ready, ensure kokoro is selected (first-time auto-select only).
+        // If already ready, ensure kokoro is selected and previews are cached.
         if (kokoroModelManager.isReady) {
             if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
                 prefs.edit()
@@ -140,6 +140,10 @@ class MainFragment : Fragment() {
                     .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
                     .apply()
             }
+            kokoroModelManager.ensureVoicePreviews(
+                KOKORO_VOICES,
+                com.travelguide.anywhere.service.KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
+            )
             return
         }
         // Don't stack a prompt on top of an already-running download.
@@ -175,15 +179,20 @@ class MainFragment : Fragment() {
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 }}}
-                // Auto-select Kokoro the first time the model becomes ready.
+                // Auto-select Kokoro + kick off voice preview caching when model is ready.
                 launch {
                     kokoroModelManager.state.collect { state ->
-                        if (state is KokoroModelManager.DownloadState.Ready &&
-                            !prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
-                            prefs.edit()
-                                .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
-                                .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
-                                .apply()
+                        if (state is KokoroModelManager.DownloadState.Ready) {
+                            if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
+                                prefs.edit()
+                                    .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
+                                    .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
+                                    .apply()
+                            }
+                            kokoroModelManager.ensureVoicePreviews(
+                                KOKORO_VOICES,
+                                com.travelguide.anywhere.service.KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
+                            )
                         }
                     }
                 }
@@ -289,6 +298,7 @@ class MainFragment : Fragment() {
         const val PREF_API_KEY = "pref_api_key"
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
+        const val DEFAULT_KOKORO_VOICE_SID = 17 // Onyx (American Male)
         private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52

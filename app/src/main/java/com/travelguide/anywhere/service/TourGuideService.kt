@@ -324,7 +324,7 @@ class TourGuideService : LifecycleService() {
             }
             "kokoro" -> {
                 if (kokoroModelManager.isReady) {
-                    val sid = sharedPrefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, 0)
+                    val sid = sharedPrefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, MainFragment.DEFAULT_KOKORO_VOICE_SID)
                         .coerceIn(0, MainFragment.KOKORO_VOICES.size - 1)
                     val lang = MainFragment.langForVoiceSid(sid)
                     KokoroTtsEngine(this, kokoroModelManager.modelDir, voiceSid = sid, lang = lang)

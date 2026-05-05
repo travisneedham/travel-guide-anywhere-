@@ -4,12 +4,17 @@ import android.content.Context
 import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
+import com.k2fsa.sherpa.onnx.OfflineTts
+import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -49,11 +54,59 @@ class KokoroModelManager @Inject constructor(
     val state: StateFlow<DownloadState> = _state
 
     val modelDir: File get() = File(context.filesDir, MODEL_DIR_NAME)
+    private val voicePreviewDir: File get() = File(context.filesDir, "voice_previews")
+
+    fun voicePreviewFile(sid: Int) = File(voicePreviewDir, "voice_$sid.wav")
 
     val isReady: Boolean
         get() = File(modelDir, "model.onnx").exists() &&
                 File(modelDir, "voices.bin").exists() &&
                 File(modelDir, "tokens.txt").exists()
+
+    @Volatile private var previewGenerationStarted = false
+
+    /** Generate and cache a short preview WAV for every voice that doesn't have one yet.
+     *  Runs in the app-scoped IO coroutine; safe to call multiple times. */
+    fun ensureVoicePreviews(voices: List<Pair<String, Int>>, template: String) {
+        if (!isReady || previewGenerationStarted) return
+        previewGenerationStarted = true
+        scope.launch {
+            try {
+                voicePreviewDir.mkdirs()
+                val tts = withContext(Dispatchers.IO) {
+                    OfflineTts(config = OfflineTtsConfig(
+                        model = OfflineTtsModelConfig(
+                            kokoro = OfflineTtsKokoroModelConfig(
+                                model = File(modelDir, "model.onnx").absolutePath,
+                                voices = File(modelDir, "voices.bin").absolutePath,
+                                tokens = File(modelDir, "tokens.txt").absolutePath,
+                                dataDir = File(modelDir, "espeak-ng-data").absolutePath,
+                                lang = "en-us",
+                            ),
+                            numThreads = 1,
+                            debug = false,
+                            provider = "cpu",
+                        )
+                    ))
+                }
+                for ((label, sid) in voices) {
+                    if (!isActive) break
+                    val dest = voicePreviewFile(sid)
+                    if (dest.exists()) continue
+                    val name = label.substringBefore(" ")
+                    withContext(Dispatchers.IO) {
+                        tts.generate(text = template.format(name), sid = sid, speed = 0.95f)
+                            .save(dest.absolutePath)
+                    }
+                    Log.d(TAG, "Preview cached: $label")
+                }
+                Log.i(TAG, "Voice preview cache complete")
+            } catch (e: Exception) {
+                previewGenerationStarted = false // allow retry on next launch
+                Log.w(TAG, "Voice preview generation failed: ${e.message}")
+            }
+        }
+    }
 
     init {
         if (isReady) _state.value = DownloadState.Ready

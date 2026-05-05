@@ -14,7 +14,7 @@
         app:navigationIcon="@drawable/ic_arrow_back"
         app:title="Settings"
         app:titleTextColor="@color/text_primary"
-        app:menu="@menu/menu_settings" />
+        />
 
     <View
         android:layout_width="match_parent"

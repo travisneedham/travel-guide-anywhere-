@@ -294,6 +294,6 @@ class KokoroTtsEngine(
 
         /** Played when the user picks a new voice in Settings. %s = the voice's first name. */
         const val VOICE_PREVIEW_TEMPLATE =
-            "Hello, my name is %s. It would be my pleasure to be your tour guide today."
+            "Hi, my name is %s. It would be my pleasure to be your tour guide today."
     }
 }
