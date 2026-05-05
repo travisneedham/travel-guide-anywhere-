@@ -53,6 +53,32 @@
                 android:contentDescription="@string/settings_title" />
         </LinearLayout>
 
+        <!-- Mode toggle: Nearby (distance-first) vs Famous (fame-first) -->
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/toggle_mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_mode_nearby"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/mode_nearby" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_mode_famous"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/mode_famous" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
         <!-- Range card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -124,6 +150,29 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="20dp">
+
+                <!-- POI photo (shown when a Wikipedia/Wikidata image is available) -->
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/iv_poi_image"
+                    android:layout_width="match_parent"
+                    android:layout_height="180dp"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    android:layout_marginBottom="4dp"
+                    app:shapeAppearance="@style/ShapeAppearance.Material3.Corner.Medium"
+                    tools:visibility="visible"
+                    tools:src="@color/stroke" />
+
+                <TextView
+                    android:id="@+id/tv_image_credit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/photo_credit"
+                    android:textSize="10sp"
+                    android:textColor="@color/text_secondary"
+                    android:gravity="end"
+                    android:layout_marginBottom="8dp"
+                    android:visibility="gone" />
 
                 <LinearLayout
                     android:layout_width="match_parent"

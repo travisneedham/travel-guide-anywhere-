@@ -11,13 +11,28 @@ data class PlaceOfInterest(
 ) {
     val distanceMiles: Float get() = distanceMeters / 1609.34f
 
-    // Higher score = more notable. wikipedia/wikidata presence is the strongest signal.
+    // Higher score = more notable. wikipedia/wikidata and heritage tags are the strongest signals.
     val fameScore: Int get() {
         var score = type.interestScore
+        // Cross-wiki presence
         if (tags.containsKey("wikipedia")) score += 1000
         if (tags.containsKey("wikidata")) score += 500
+        // UNESCO World Heritage (heritage=1) and national/regional designations
+        when (tags["heritage"]) {
+            "1" -> score += 2000
+            "2" -> score += 800
+            "3" -> score += 400
+        }
+        // Tourism type bonuses
         if (tags["tourism"] == "attraction") score += 200
         if (tags["tourism"] == "museum") score += 150
+        // Documentation richness signals
+        if (tags.containsKey("wikimedia_commons")) score += 100
+        if (tags.containsKey("image")) score += 50
+        if (tags["fee"] == "yes") score += 75
+        if (tags.containsKey("opening_hours")) score += 50
+        // Historic type specificity
+        if (tags["historic"] in setOf("castle", "archaeological_site")) score += 80
         return score
     }
 

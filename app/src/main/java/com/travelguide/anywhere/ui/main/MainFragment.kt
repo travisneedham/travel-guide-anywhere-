@@ -13,6 +13,7 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import coil.load
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.travelguide.anywhere.BuildConfig
@@ -30,6 +31,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 @AndroidEntryPoint
 class MainFragment : Fragment() {
@@ -39,7 +41,11 @@ class MainFragment : Fragment() {
     private val viewModel: MainViewModel by viewModels()
 
     private var sliderInSpeedMode = false
-    private var savedRangeSliderValue = 4f
+    private var isFamousMode = false
+
+    // Separate saved values per mode so switching back restores the last-used radius.
+    private var savedNearbySliderValue = 4f   // 1 mile
+    private var savedFamousSliderValue = 25f  // 25 miles
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
@@ -53,15 +59,52 @@ class MainFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // Restore mode and saved radii before setting up slider.
+        isFamousMode = prefs.getBoolean(PREF_FAMOUS_MODE, false)
+        savedNearbySliderValue = prefs.getFloat(PREF_NEARBY_RADIUS, 4f)
+        savedFamousSliderValue = prefs.getFloat(PREF_FAMOUS_RADIUS, 25f)
+
+        setupModeToggle()
         setupSlider()
         setupButtons()
         observeState()
         checkKokoroOnStartup()
     }
 
+    // ── Mode toggle ────────────────────────────────────────────────────────────
+
+    private fun setupModeToggle() {
+        // Set initial checked state without triggering the listener.
+        if (isFamousMode) binding.toggleMode.check(R.id.btn_mode_famous)
+        else binding.toggleMode.check(R.id.btn_mode_nearby)
+
+        binding.toggleMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val newFamous = checkedId == R.id.btn_mode_famous
+            if (newFamous == isFamousMode) return@addOnButtonCheckedListener
+
+            // Save current radius value for the mode we're leaving.
+            if (!sliderInSpeedMode) {
+                if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
+                else savedNearbySliderValue = binding.rangeSlider.value
+            }
+
+            isFamousMode = newFamous
+            prefs.edit()
+                .putBoolean(PREF_FAMOUS_MODE, isFamousMode)
+                .putFloat(PREF_NEARBY_RADIUS, savedNearbySliderValue)
+                .putFloat(PREF_FAMOUS_RADIUS, savedFamousSliderValue)
+                .apply()
+
+            if (!sliderInSpeedMode) applyModeSliderConfig()
+        }
+    }
+
+    // ── Slider ─────────────────────────────────────────────────────────────────
+
     private fun setupSlider() {
-        binding.rangeSlider.value = savedRangeSliderValue
-        updateRangeLabel(savedRangeSliderValue)
+        applyModeSliderConfig()
         binding.rangeSlider.addOnChangeListener { _, value, fromUser ->
             if (sliderInSpeedMode) {
                 updateSpeedLabel(value)
@@ -75,9 +118,29 @@ class MainFragment : Fragment() {
         }
     }
 
+    private fun applyModeSliderConfig() {
+        val targetValue = if (isFamousMode) savedFamousSliderValue else savedNearbySliderValue
+        binding.rangeSlider.apply {
+            if (isFamousMode) {
+                valueFrom = 5f
+                valueTo = 100f
+                stepSize = 5f
+                value = ((targetValue / 5f).roundToInt() * 5f).coerceIn(5f, 100f)
+            } else {
+                valueFrom = 1f
+                valueTo = 40f
+                stepSize = 1f
+                value = targetValue.coerceIn(1f, 40f)
+            }
+        }
+        updateRangeLabel(binding.rangeSlider.value)
+    }
+
     private fun switchSliderToSpeedMode() {
         if (sliderInSpeedMode) return
-        savedRangeSliderValue = binding.rangeSlider.value
+        // Save range value for the current mode before taking over the slider.
+        if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
+        else savedNearbySliderValue = binding.rangeSlider.value
         sliderInSpeedMode = true
         val rate = prefs.getFloat(PREF_SPEECH_RATE, 0.95f).coerceIn(0.5f, 1.5f)
         binding.rangeSlider.apply {
@@ -92,24 +155,24 @@ class MainFragment : Fragment() {
     private fun switchSliderToRangeMode() {
         if (!sliderInSpeedMode) return
         sliderInSpeedMode = false
-        binding.rangeSlider.apply {
-            valueFrom = 1f
-            valueTo = 40f
-            stepSize = 1f
-            value = savedRangeSliderValue
-        }
-        updateRangeLabel(savedRangeSliderValue)
+        applyModeSliderConfig()
     }
 
     private fun updateRangeLabel(value: Float) {
-        val miles = value / 4f
-        val formatted = if (miles < 1f) "%.2f".format(miles) else "%.1f".format(miles)
+        val miles = if (isFamousMode) value else value / 4f
+        val formatted = when {
+            miles < 1f   -> "%.2f".format(miles)
+            miles < 10f  -> "%.1f".format(miles)
+            else         -> "%.0f".format(miles)
+        }
         binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
     }
 
     private fun updateSpeedLabel(rate: Float) {
         binding.tvRangeLabel.text = getString(R.string.speed_label, "%.2f".format(rate))
     }
+
+    // ── Buttons ────────────────────────────────────────────────────────────────
 
     private fun setupButtons() {
         binding.btnGo.setOnClickListener {
@@ -118,7 +181,8 @@ class MainFragment : Fragment() {
                 showApiKeyDialog()
                 return@setOnClickListener
             }
-            viewModel.startTour(binding.rangeSlider.value / 4f, apiKey)
+            val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
+            viewModel.startTour(miles, apiKey, isFamousMode)
         }
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
         binding.btnPause.setOnClickListener { viewModel.pauseOrResume() }
@@ -131,8 +195,9 @@ class MainFragment : Fragment() {
         }
     }
 
+    // ── Kokoro startup ─────────────────────────────────────────────────────────
+
     private fun checkKokoroOnStartup() {
-        // If already ready, ensure kokoro is selected and previews are cached.
         if (kokoroModelManager.isReady) {
             if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
                 prefs.edit()
@@ -146,7 +211,6 @@ class MainFragment : Fragment() {
             )
             return
         }
-        // Don't stack a prompt on top of an already-running download.
         val s = kokoroModelManager.state.value
         if (s is KokoroModelManager.DownloadState.Downloading ||
             s is KokoroModelManager.DownloadState.Extracting) return
@@ -165,10 +229,14 @@ class MainFragment : Fragment() {
             .show()
     }
 
+    // ── API key ────────────────────────────────────────────────────────────────
+
     private fun resolveApiKey(): String {
         val saved = prefs.getString(PREF_API_KEY, null)
         return if (!saved.isNullOrBlank()) saved else BuildConfig.ANTHROPIC_API_KEY
     }
+
+    // ── State observation ──────────────────────────────────────────────────────
 
     private fun observeState() {
         viewLifecycleOwner.lifecycleScope.launch {
@@ -179,7 +247,16 @@ class MainFragment : Fragment() {
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 }}}
-                // Auto-select Kokoro + kick off voice preview caching when model is ready.
+                launch { viewModel.currentPoiImage.collect { imageUrl ->
+                    if (imageUrl != null) {
+                        binding.ivPoiImage.load(imageUrl) { crossfade(300) }
+                        binding.ivPoiImage.visibility = View.VISIBLE
+                        binding.tvImageCredit.visibility = View.VISIBLE
+                    } else {
+                        binding.ivPoiImage.visibility = View.GONE
+                        binding.tvImageCredit.visibility = View.GONE
+                    }
+                }}
                 launch {
                     kokoroModelManager.state.collect { state ->
                         if (state is KokoroModelManager.DownloadState.Ready) {
@@ -206,6 +283,7 @@ class MainFragment : Fragment() {
         binding.btnStop.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.cardStatus.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
+        binding.toggleMode.isEnabled = !isActive
         if (isActive) switchSliderToSpeedMode() else switchSliderToRangeMode()
 
         val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
@@ -222,7 +300,8 @@ class MainFragment : Fragment() {
         binding.tvStatus.text = when (state) {
             TourState.IDLE -> ""
             TourState.LOCATING -> getString(R.string.status_locating)
-            TourState.FETCHING -> getString(R.string.status_fetching)
+            TourState.FETCHING -> if (isFamousMode) "Finding famous landmarks…"
+                                  else getString(R.string.status_fetching)
             TourState.GENERATING -> getString(R.string.status_generating)
             TourState.LOADING_AUDIO -> getString(R.string.status_loading_audio)
             TourState.SPEAKING -> {
@@ -239,7 +318,8 @@ class MainFragment : Fragment() {
                 else getString(R.string.status_speaking)
             }
             TourState.PAUSED -> getString(R.string.status_paused)
-            TourState.NO_NEW_POIS -> getString(R.string.status_no_new_pois)
+            TourState.NO_NEW_POIS -> if (isFamousMode) getString(R.string.status_no_new_pois_famous)
+                                     else getString(R.string.status_no_new_pois)
             TourState.ERROR -> getString(R.string.status_error)
         }
 
@@ -295,7 +375,10 @@ class MainFragment : Fragment() {
             .setPositiveButton("Save & Start") { _, _ ->
                 val key = input.text?.toString()?.trim() ?: ""
                 prefs.edit().putString(PREF_API_KEY, key).apply()
-                if (key.isNotBlank()) viewModel.startTour(binding.rangeSlider.value / 4f, key)
+                if (key.isNotBlank()) {
+                    val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
+                    viewModel.startTour(miles, key, isFamousMode)
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -303,6 +386,15 @@ class MainFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // Persist slider values when leaving the fragment.
+        if (!sliderInSpeedMode) {
+            if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
+            else savedNearbySliderValue = binding.rangeSlider.value
+        }
+        prefs.edit()
+            .putFloat(PREF_NEARBY_RADIUS, savedNearbySliderValue)
+            .putFloat(PREF_FAMOUS_RADIUS, savedFamousSliderValue)
+            .apply()
         _binding = null
     }
 
@@ -311,6 +403,9 @@ class MainFragment : Fragment() {
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
         const val DEFAULT_KOKORO_VOICE_SID = 17 // Onyx (American Male)
+        const val PREF_FAMOUS_MODE = "pref_famous_mode"
+        const val PREF_NEARBY_RADIUS = "pref_nearby_radius"
+        const val PREF_FAMOUS_RADIUS = "pref_famous_radius"
         private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52

@@ -12,6 +12,7 @@ fragment = "1.8.5"
 material = "1.12.0"
 playServicesLocation = "21.3.0"
 commonsCompress = "1.27.1"
+coil = "2.7.0"
 media = "1.7.0"
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
@@ -53,6 +54,7 @@ play-services-location = { group = "com.google.android.gms", name = "play-servic
 
 # Commons Compress (tar.bz2 extraction for Kokoro model download)
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
+coil = { group = "io.coil-kt", name = "coil", version.ref = "coil" }
 
 # AndroidX Media (MediaBrowserServiceCompat for Android Auto)
 androidx-media = { group = "androidx.media", name = "media", version.ref = "media" }

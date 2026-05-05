@@ -22,6 +22,7 @@ import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.repository.NarrationRepository
+import com.travelguide.anywhere.repository.PoiImageRepository
 import com.travelguide.anywhere.repository.PoiRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -40,13 +41,16 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
     @Inject lateinit var kokoroModelManager: KokoroModelManager
+    @Inject lateinit var poiImageRepository: PoiImageRepository
 
     private var ttsEngine: TtsEngine? = null
     private var radiusMiles = 1f
     private var apiKey = ""
+    private var famousMode = false
     private var lastLocation: Location? = null
     private var generationJob: Job? = null
     private var prefetchJob: Job? = null
+    private var imageFetchJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
     private var savedTopicName = ""
@@ -71,12 +75,11 @@ class TourGuideService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START -> {
-                // Re-init engine in case provider/keys changed since last run.
                 initTtsEngine()
                 mentionedPlacesStore.load()
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
-                // Persist radius so Android Auto can restart the tour without a UI interaction.
+                famousMode = intent.getBooleanExtra(EXTRA_FAMOUS_MODE, false)
                 sharedPrefs.edit().putFloat(PREF_LAST_RADIUS, radiusMiles).apply()
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
@@ -116,9 +119,11 @@ class TourGuideService : LifecycleService() {
             try {
                 isGenerating = true
                 emitState(TourState.FETCHING)
-                updateNotification("Finding interesting places nearby...")
+                val fetchMsg = if (famousMode) "Finding famous landmarks nearby..."
+                               else "Finding interesting places nearby..."
+                updateNotification(fetchMsg)
 
-                val pois = poiRepository.fetchPois(location, radiusMiles)
+                val pois = poiRepository.fetchPois(location, radiusMiles, famousMode)
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
 
                 if (pois.isEmpty()) {
@@ -135,6 +140,15 @@ class TourGuideService : LifecycleService() {
                 mentionedPlacesStore.sessionNames.add(poi.name)
                 currentNarrationPoi = poi
                 emitCurrentPois(listOf(poi))
+
+                // Fetch POI image in background — non-blocking for the narration flow.
+                emitCurrentPoiImage(null)
+                imageFetchJob?.cancel()
+                imageFetchJob = lifecycleScope.launch {
+                    emitCurrentPoiImage(
+                        try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
+                    )
+                }
 
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
                 isGenerating = false
@@ -155,13 +169,11 @@ class TourGuideService : LifecycleService() {
         }
     }
 
-    // Runs in the background while the current narration is playing so the
-    // next POI + script is ready the moment this one finishes.
     private fun prefetchNextNarration(location: Location) {
         if (prefetchJob?.isActive == true) return
         prefetchJob = lifecycleScope.launch {
             try {
-                val pois = poiRepository.fetchPois(location, radiusMiles)
+                val pois = poiRepository.fetchPois(location, radiusMiles, famousMode)
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
                 if (pois.isEmpty()) return@launch
                 val poi = pois.first()
@@ -200,12 +212,9 @@ class TourGuideService : LifecycleService() {
             onStart = {
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
-                // Audio is playing — fetch the next POI + script in the background.
                 lastLocation?.let { prefetchNextNarration(it) }
             },
             onEnqueued = {
-                // Last chunk is generated; engine is idle while it plays.
-                // Pre-warm chunk 0 of the next narration so speak() can start instantly.
                 prefetchedNarration?.second?.let { nextText ->
                     Log.d(TAG, "onEnqueued: prewarm triggered for next narration")
                     ttsEngine?.prewarm(nextText, speechRate)
@@ -223,7 +232,6 @@ class TourGuideService : LifecycleService() {
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
 
-                    // Use the pre-fetched narration if it finished in time.
                     val prefetched = prefetchedNarration.also { prefetchedNarration = null }
                     prefetchJob?.cancel(); prefetchJob = null
 
@@ -234,6 +242,14 @@ class TourGuideService : LifecycleService() {
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
                         currentNarrationPoi = nextPoi
                         emitCurrentPois(listOf(nextPoi))
+                        // Fetch image for prefetched POI.
+                        emitCurrentPoiImage(null)
+                        imageFetchJob?.cancel()
+                        imageFetchJob = lifecycleScope.launch {
+                            emitCurrentPoiImage(
+                                try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
+                            )
+                        }
                         speak(nextNarration, nextPoi.name)
                     } else {
                         lastLocation?.let { onLocationUpdate(it) }
@@ -282,8 +298,10 @@ class TourGuideService : LifecycleService() {
         }
         currentNarrationPoi = null
         emitCurrentTopic("")
+        emitCurrentPoiImage(null)
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
+        imageFetchJob?.cancel(); imageFetchJob = null
         prefetchedNarration = null
         ttsEngine?.stop()
         isSpeaking = false
@@ -296,6 +314,7 @@ class TourGuideService : LifecycleService() {
         currentNarrationPoi = null
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
+        imageFetchJob?.cancel(); imageFetchJob = null
         prefetchedNarration = null
         fusedLocation.removeLocationUpdates(locationCallback)
         ttsEngine?.stop()
@@ -303,6 +322,7 @@ class TourGuideService : LifecycleService() {
         isGenerating = false
         savedTopicName = ""
         emitState(TourState.IDLE)
+        emitCurrentPoiImage(null)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -382,6 +402,7 @@ class TourGuideService : LifecycleService() {
         const val ACTION_SKIP = "ACTION_SKIP"
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
+        const val EXTRA_FAMOUS_MODE = "EXTRA_FAMOUS_MODE"
         const val CHANNEL_ID = "tour_guide_channel"
         const val NOTIFICATION_ID = 1001
         const val PREFS_NAME = "tour_prefs"
@@ -401,11 +422,13 @@ class TourGuideService : LifecycleService() {
         val currentPois = MutableStateFlow<List<PlaceOfInterest>>(emptyList())
         val mentionedPlaces = MutableStateFlow<List<MentionedPlacesStore.Entry>>(emptyList())
         val errorMessage = MutableStateFlow<String?>(null)
+        val currentPoiImage = MutableStateFlow<String?>(null)
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }
         private fun emitCurrentPois(pois: List<PlaceOfInterest>) { currentPois.value = pois }
         private fun emitError(msg: String) { errorMessage.value = msg }
+        private fun emitCurrentPoiImage(url: String?) { currentPoiImage.value = url }
     }
 }
 

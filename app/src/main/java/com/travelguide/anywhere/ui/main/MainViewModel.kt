@@ -36,16 +36,21 @@ class MainViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = TourGuideService.errorMessage
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    fun startTour(radiusMiles: Float, apiKey: String) {
+    val currentPoiImage: StateFlow<String?> = TourGuideService.currentPoiImage
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun startTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {
         TourGuideService.tourState.value = TourState.LOCATING
         TourGuideService.currentTopic.value = ""
         TourGuideService.currentPois.value = emptyList()
         TourGuideService.errorMessage.value = null
+        TourGuideService.currentPoiImage.value = null
 
         val intent = Intent(getApplication(), TourGuideService::class.java).apply {
             action = TourGuideService.ACTION_START
             putExtra(TourGuideService.EXTRA_RADIUS_MILES, radiusMiles)
             putExtra(TourGuideService.EXTRA_API_KEY, apiKey)
+            putExtra(TourGuideService.EXTRA_FAMOUS_MODE, famousMode)
         }
         getApplication<Application>().startForegroundService(intent)
     }

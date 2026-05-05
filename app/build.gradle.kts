@@ -22,8 +22,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 56
-        versionName = "1.9.9"
+        versionCode = 57
+        versionName = "2.0.0"
 
         buildConfigField(
             "String",
@@ -128,6 +128,9 @@ dependencies {
 
     // Commons Compress (tar.bz2 extraction for Kokoro model download)
     implementation(libs.commons.compress)
+
+    // Coil (image loading for POI photos)
+    implementation(libs.coil)
 
     // AndroidX Media — MediaBrowserServiceCompat for Android Auto
     implementation(libs.androidx.media)

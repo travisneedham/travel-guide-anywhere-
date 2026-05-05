@@ -22,10 +22,14 @@ class PoiRepository @Inject constructor(
 
     suspend fun fetchPois(
         location: Location,
-        radiusMiles: Float
+        radiusMiles: Float,
+        famousMode: Boolean = false
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
-        val query = buildQuery(location.latitude, location.longitude, radiusMeters)
+        val query = if (famousMode)
+            buildFamousQuery(location.latitude, location.longitude, radiusMeters)
+        else
+            buildNearbyQuery(location.latitude, location.longitude, radiusMeters)
 
         val body = FormBody.Builder()
             .add("data", query)
@@ -35,7 +39,7 @@ class PoiRepository @Inject constructor(
             .url("https://overpass-api.de/api/interpreter")
             .post(body)
             .header("Accept", "*/*")
-            .header("User-Agent", "TravelGuideAnywhere/1.0 (Android)")
+            .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
             .build()
 
         val responseJson = okHttpClient.newCall(request).execute().use { response ->
@@ -51,12 +55,14 @@ class PoiRepository @Inject constructor(
             .filter { it.tags.containsKey("name") }
             .map { element -> element.toPlaceOfInterest(location) }
             .distinctBy { it.name }
-            .sortedWith(compareByDescending<PlaceOfInterest> { it.fameScore }.thenBy { it.distanceMeters })
+            .let { pois ->
+                if (famousMode) pois.sortedByDescending { it.fameScore }
+                else pois.sortedBy { it.distanceMeters }
+            }
     }
 
-    private fun buildQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        // nwr = node/way/relation; ["name"] co-filter drops unnamed clutter and removes
-        // the need for a hard result cap (named POIs stay ~30-50 even in dense areas).
+    // Nearby mode: all interesting POI types sorted by distance (closest first).
+    private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:25];\n" +
         "(\n" +
         "  nwr[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
@@ -65,6 +71,20 @@ class PoiRepository @Inject constructor(
         "  node[\"name\"][\"amenity\"=\"place_of_worship\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
         "out body center;"
+
+    // Famous mode: filter to Wikipedia/Wikidata/heritage-tagged places and top tourism
+    // types so we get notable landmarks even at large radii. Sorted by fameScore.
+    private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
+        "[out:json][timeout:40];\n" +
+        "(\n" +
+        "  nwr[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"wikidata\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  nwr[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins\"](around:$radiusMeters,$lat,$lon);\n" +
+        ");\n" +
+        "out body center 80;"
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
