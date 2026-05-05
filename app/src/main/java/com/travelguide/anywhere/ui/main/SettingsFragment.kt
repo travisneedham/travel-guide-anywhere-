@@ -247,7 +247,7 @@ class SettingsFragment : Fragment() {
             MaterialAlertDialogBuilder(requireContext())
                 .setTitle("Clear History?")
                 .setMessage(
-                    "This removes all places from your "Places Covered" list. " +
+                    "This removes all places from your \"Places Covered\" list. " +
                     "They will be eligible to be narrated again on your next tour."
                 )
                 .setPositiveButton("Clear") { _, _ ->
