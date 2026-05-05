@@ -15,6 +15,7 @@ import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.remote.ClaudeApiService
@@ -52,6 +53,8 @@ class SettingsFragment : Fragment() {
     private var previewTts: OfflineTts? = null
     private var previewJob: Job? = null
     private var previewPlayer: android.media.MediaPlayer? = null
+    private var lastPreviewSid: Int = -1
+    private var lastPreviewName: String = ""
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -123,15 +126,26 @@ class SettingsFragment : Fragment() {
                 MainFragment.KOKORO_VOICES.map { it.first })
         )
         val savedSid = prefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, MainFragment.DEFAULT_KOKORO_VOICE_SID)
-        binding.actvKokoroVoice.setText(
-            MainFragment.KOKORO_VOICES.getOrElse(savedSid) { MainFragment.KOKORO_VOICES[0] }.first, false
-        )
+        val savedEntry = MainFragment.KOKORO_VOICES.getOrElse(savedSid) { MainFragment.KOKORO_VOICES[0] }
+        binding.actvKokoroVoice.setText(savedEntry.first, false)
+        lastPreviewSid = savedSid
+        lastPreviewName = savedEntry.first.substringBefore(" ")
+
         binding.actvKokoroVoice.setOnItemClickListener { _, _, position, _ ->
             val entry = MainFragment.KOKORO_VOICES.getOrNull(position) ?: return@setOnItemClickListener
-            // Persist immediately so the voice sticks even without an explicit save.
             prefs.edit().putInt(MainFragment.PREF_KOKORO_VOICE_SID, entry.second).apply()
+            lastPreviewSid = entry.second
+            lastPreviewName = entry.first.substringBefore(" ")
             previewVoice(sid = entry.second, voiceName = entry.first.substringBefore(" "))
         }
+
+        // Replay the last voice preview when the user drags the speed slider.
+        binding.sliderSpeechRate.addOnChangeListener { _, _, fromUser ->
+            if (fromUser && lastPreviewSid >= 0) {
+                previewVoice(sid = lastPreviewSid, voiceName = lastPreviewName)
+            }
+        }
+
         // Kick off background preview caching if not already done.
         kokoroModelManager.ensureVoicePreviews(
             MainFragment.KOKORO_VOICES,
@@ -230,8 +244,18 @@ class SettingsFragment : Fragment() {
 
     private fun setupDiagnostics() {
         binding.btnClearHistory.setOnClickListener {
-            viewModel.clearHistory()
-            Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Clear History?")
+                .setMessage(
+                    "This removes all places from your "Places Covered" list. " +
+                    "They will be eligible to be narrated again on your next tour."
+                )
+                .setPositiveButton("Clear") { _, _ ->
+                    viewModel.clearHistory()
+                    Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
         binding.btnCopyLogs.setOnClickListener {
             lifecycleScope.launch {
@@ -327,6 +351,7 @@ class SettingsFragment : Fragment() {
 
     private fun previewVoice(sid: Int, voiceName: String) {
         if (!kokoroModelManager.isReady) return
+        val speed = binding.sliderSpeechRate.value  // capture before coroutine
         previewJob?.cancel()
         previewPlayer?.runCatching { stop() }
         previewPlayer?.release()
@@ -374,13 +399,16 @@ class SettingsFragment : Fragment() {
                 setDataSource(wavToPlay.absolutePath)
                 prepare()
                 setOnCompletionListener {
-                    // Only delete if it was a temp file, not the persistent cache.
                     if (wavToPlay != cached) wavToPlay.delete()
                     previewPlayer = null
                 }
             }
             previewPlayer = mp
             mp.start()
+            // Apply speed after start() — most reliable across Android versions.
+            try {
+                mp.playbackParams = android.media.PlaybackParams().setSpeed(speed)
+            } catch (_: Exception) { /* plays at normal speed if unsupported */ }
         }
     }
 
