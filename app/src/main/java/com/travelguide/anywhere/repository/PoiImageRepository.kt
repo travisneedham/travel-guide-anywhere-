@@ -22,22 +22,32 @@ class PoiImageRepository @Inject constructor(
      * Priority: wikipedia tag → wikidata P18 → wikimedia_commons File tag
      */
     suspend fun fetchImageUrl(poi: PlaceOfInterest): String? = withContext(Dispatchers.IO) {
+        val wp = poi.tags["wikipedia"]
+        val wd = poi.tags["wikidata"]
+        val wc = poi.tags["wikimedia_commons"]
+        Log.d(TAG, "${poi.name}: wikipedia=$wp  wikidata=$wd  wikimedia_commons=$wc")
         try {
-            poi.tags["wikipedia"]?.let { tag ->
-                fetchWikipediaImage(tag)?.let { return@withContext it }
+            wp?.let { tag ->
+                val url = fetchWikipediaImage(tag)
+                Log.d(TAG, "${poi.name}: wikipedia→$url")
+                url?.let { return@withContext it }
             }
-            poi.tags["wikidata"]?.let { qid ->
-                fetchWikidataImage(qid)?.let { return@withContext it }
+            wd?.let { qid ->
+                val url = fetchWikidataImage(qid)
+                Log.d(TAG, "${poi.name}: wikidata($qid)→$url")
+                url?.let { return@withContext it }
             }
-            poi.tags["wikimedia_commons"]
-                ?.takeIf { it.startsWith("File:") }
+            wc?.takeIf { it.startsWith("File:") }
                 ?.removePrefix("File:")
                 ?.let { filename ->
-                    fetchCommonsImageUrl(filename)?.let { return@withContext it }
+                    val url = fetchCommonsImageUrl(filename)
+                    Log.d(TAG, "${poi.name}: wikimedia_commons($filename)→$url")
+                    url?.let { return@withContext it }
                 }
         } catch (e: Exception) {
             Log.w(TAG, "Image fetch failed for ${poi.name}: ${e.message}")
         }
+        Log.d(TAG, "${poi.name}: no image found")
         null
     }
 

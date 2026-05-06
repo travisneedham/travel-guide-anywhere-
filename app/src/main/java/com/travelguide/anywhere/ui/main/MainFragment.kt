@@ -249,7 +249,24 @@ class MainFragment : Fragment() {
                 }}}
                 launch { viewModel.currentPoiImage.collect { imageUrl ->
                     if (imageUrl != null) {
-                        binding.ivPoiImage.load(imageUrl) { crossfade(300) }
+                        android.util.Log.d("MainFragment", "Loading POI image: $imageUrl")
+                        binding.ivPoiImage.load(imageUrl) {
+                            crossfade(300)
+                            listener(
+                                onSuccess = { _, _ ->
+                                    binding.ivPoiImage.visibility = View.VISIBLE
+                                    binding.tvImageCredit.visibility = View.VISIBLE
+                                },
+                                onError = { _, result ->
+                                    android.util.Log.w("MainFragment",
+                                        "Coil failed to load $imageUrl — ${result.throwable}")
+                                    binding.ivPoiImage.visibility = View.GONE
+                                    binding.tvImageCredit.visibility = View.GONE
+                                }
+                            )
+                        }
+                        // Show image+credit immediately so there's no flash if load succeeds.
+                        // onError above will hide them if loading fails.
                         binding.ivPoiImage.visibility = View.VISIBLE
                         binding.tvImageCredit.visibility = View.VISIBLE
                     } else {
