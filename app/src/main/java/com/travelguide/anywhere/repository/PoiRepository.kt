@@ -96,20 +96,21 @@ class PoiRepository @Inject constructor(
         ");\n" +
         "out body center;"
 
-    // Famous mode: filter to well-known landmarks at large radii. Relations are excluded from
-    // the wikipedia filter because administrative boundary relations (cities, counties) also
-    // carry wikipedia tags and cause query timeouts. All other filters use nwr since they
-    // match far fewer elements. Sorted by fameScore; wikidata tag presence on returned items
-    // still boosts the score even though wikidata is not used as a query filter.
+    // Famous mode: only node+way types, no relations.
+    // - wikipedia: node only (way["wikipedia"] is slow — the tag has millions of OSM entries
+    //   and evaluating way bounding boxes against all of them is expensive even at small radii)
+    // - tourism/historic/heritage: node + way only (skip relations — large multipolygons like
+    //   university campuses or lakes mapped as relations cause query timeouts)
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:40];\n" +
+        "[out:json][timeout:30];\n" +
         "(\n" +
         "  node[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"tourism\"=\"attraction\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"tourism\"=\"museum\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
         "out body center 80;"
 
