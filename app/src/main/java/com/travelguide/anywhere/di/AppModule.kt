@@ -32,6 +32,15 @@ object AppModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                // Set a descriptive User-Agent on every request (including Coil image loads).
+                // Wikimedia's CDN blocks OkHttp's default "okhttp/x.y.z" agent.
+                val req = chain.request().takeIf { it.header("User-Agent") != null }
+                    ?: chain.request().newBuilder()
+                        .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+                        .build()
+                chain.proceed(req)
+            }
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BODY
