@@ -56,15 +56,16 @@ class PoiImageRepository @Inject constructor(
         if (colon < 0) return null
         val lang = tag.substring(0, colon)
         val title = tag.substring(colon + 1)
-        // OkHttp's addPathSegment handles URL encoding of the title correctly.
-        val url = okhttp3.HttpUrl.Builder()
-            .scheme("https")
-            .host("$lang.wikipedia.org")
-            .addPathSegments("api/rest_v1/page/summary")
-            .addPathSegment(title)
-            .build()
-        return get(url.toString())?.let { body ->
-            gson.fromJson(body, JsonObject::class.java)
+        // Use the MediaWiki pageimages API — more reliable than the REST summary endpoint,
+        // which only includes "thumbnail" when a lead image is explicitly configured on the
+        // article. pageimages returns the designated representative image for any article.
+        val url = "https://$lang.wikipedia.org/w/api.php" +
+                "?action=query&titles=${Uri.encode(title)}&prop=pageimages&pithumbsize=640&format=json"
+        return get(url)?.let { body ->
+            val pages = gson.fromJson(body, JsonObject::class.java)
+                ?.getAsJsonObject("query")
+                ?.getAsJsonObject("pages")
+            pages?.entrySet()?.firstOrNull()?.value?.asJsonObject
                 ?.getAsJsonObject("thumbnail")
                 ?.get("source")?.asString
         }
