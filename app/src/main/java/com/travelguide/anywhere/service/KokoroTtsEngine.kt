@@ -29,8 +29,11 @@ class KokoroTtsEngine(
     private val lang: String = "en-us",
 ) : TtsEngine {
 
-    // Private scope so shutdown() cancels both the init job and any speak job.
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // Single-thread dispatcher so that two generation jobs never access the
+    // OfflineTts model concurrently (the model is not thread-safe).
+    private val genDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     override var isReady: Boolean = false
         private set
@@ -40,10 +43,10 @@ class KokoroTtsEngine(
     private var mediaPlayer: MediaPlayer? = null
     private var isPaused = false
 
-    // Pre-generated first chunk for the NEXT narration, started while current narration
-    // finishes playing so speak() can begin with zero generation delay.
-    private var prewarmChunk: String? = null
-    private var prewarmJob: Deferred<Pair<MediaPlayer, File>?>? = null
+    // Pre-generated audio for the NEXT narration, produced while the current
+    // narration is playing so speak() can start immediately when called.
+    private var prewarmText: String? = null
+    private var prewarmDeferred: Deferred<List<Pair<MediaPlayer, File>>?>? = null
 
     override val canResume: Boolean get() = isPaused && mediaPlayer != null
 
@@ -73,14 +76,20 @@ class KokoroTtsEngine(
         }
     }
 
+    /**
+     * Pre-generate ALL audio chunks for [text] while the current narration plays.
+     * When speak() is later called with the same text it awaits this deferred and
+     * starts playback immediately rather than waiting for generation.
+     */
     override fun prewarm(text: String, speechRate: Float) {
+        if (text == prewarmText && prewarmDeferred?.isActive == true) return
+        prewarmDeferred?.cancel()
         val engine = tts ?: return
-        val chunk = splitIntoChunks(normalizeForTts(text)).firstOrNull() ?: return
-        prewarmJob?.cancel()
-        prewarmChunk = chunk
-        prewarmJob = engineScope.async(Dispatchers.IO) {
-            Log.d(TAG, "Prewarm: generating chunk[${chunk.length}ch]")
-            preparePlayer(engine, chunk, speechRate)
+        val chunks = splitIntoChunks(normalizeForTts(text))
+        prewarmText = text
+        prewarmDeferred = engineScope.async(genDispatcher) {
+            Log.d(TAG, "Prewarm: generating ${chunks.size} chunks (${text.length} chars)")
+            generateAllChunks(engine, chunks, speechRate)
         }
     }
 
@@ -97,47 +106,43 @@ class KokoroTtsEngine(
         val chunks = splitIntoChunks(normalizeForTts(text))
 
         speakJob = engineScope.launch {
-            var onStartCalled = false
+            // Grab whatever prewarm state exists
+            val preDeferred = prewarmDeferred.also { prewarmDeferred = null }
+            val preText    = prewarmText.also    { prewarmText    = null }
 
-            // Use a pre-warmed player for chunk 0 if one matches, otherwise generate now.
-            val storedJob = prewarmJob; val storedChunk = prewarmChunk
-            prewarmJob = null; prewarmChunk = null
-            var pendingPlay: Deferred<Pair<MediaPlayer, File>?> =
-                if (storedJob != null && storedChunk == chunks.firstOrNull()) {
-                    Log.d(TAG, "Using prewarm result for chunk 0")
-                    storedJob
+            // Step 1: Obtain all pre-generated (MediaPlayer, wavFile) pairs.
+            val players: List<Pair<MediaPlayer, File>> = if (preText == text && preDeferred != null) {
+                // Pre-generation was started for this exact text; await it.
+                Log.d(TAG, "Awaiting pre-generated audio for \"${text.take(40)}...\"")
+                val pregenerated = preDeferred.await()
+                if (pregenerated != null) {
+                    Log.d(TAG, "Using ${pregenerated.size} pre-generated chunks")
+                    pregenerated
                 } else {
-                    storedJob?.cancel()
-                    async(Dispatchers.IO) { preparePlayer(engine, chunks[0], speechRate) }
+                    // Prewarm failed; fall through to fresh generation.
+                    withContext(genDispatcher) { generateAllChunks(engine, chunks, speechRate) }
+                        ?: run { withContext(Dispatchers.Main) { onError() }; return@launch }
                 }
+            } else {
+                // Different text or no prewarm: cancel any stale prewarm, generate fresh.
+                preDeferred?.cancel()
+                withContext(genDispatcher) { generateAllChunks(engine, chunks, speechRate) }
+                    ?: run { withContext(Dispatchers.Main) { onError() }; return@launch }
+            }
 
-            for (idx in chunks.indices) {
-                if (!isActive) { pendingPlay.cancel(); return@launch }
-                val isLast = idx == chunks.lastIndex
+            if (!isActive) { players.release(); return@launch }
 
-                val result = pendingPlay.await() ?: run {
-                    withContext(Dispatchers.Main) { onError() }
-                    return@launch
-                }
-                val (mp, wavFile) = result
+            // Step 2: All audio is ready — signal callers, then play.
+            withContext(Dispatchers.Main) {
+                onStart()     // emits SPEAKING state, triggers prefetch of next narration
+                onEnqueued()  // kept for interface compatibility; no-op in current service
+            }
 
-                // While this chunk plays, generate + prepare the next one.
-                if (!isLast) {
-                    pendingPlay = async(Dispatchers.IO) {
-                        preparePlayer(engine, chunks[idx + 1], speechRate)
-                    }
-                } else {
-                    // Last chunk is ready; engine is now idle — signal caller to prewarm
-                    // the next narration while this final chunk plays.
-                    withContext(Dispatchers.Main) { onEnqueued() }
-                }
-
-                if (!isActive) {
-                    mp.release()
-                    wavFile.delete()
-                    if (!isLast) pendingPlay.cancel()
-                    return@launch
-                }
+            // Step 3: Play all chunks back-to-back (no generation gaps).
+            for ((idx, playerFile) in players.withIndex()) {
+                if (!isActive) { players.drop(idx).release(); return@launch }
+                val (mp, wavFile) = playerFile
+                val isLast = idx == players.lastIndex
 
                 val ok = withContext(Dispatchers.Main) {
                     suspendCancellableCoroutine { cont ->
@@ -154,10 +159,6 @@ class KokoroTtsEngine(
                         }
                         mediaPlayer?.release()
                         mediaPlayer = mp
-                        if (!onStartCalled) {
-                            onStartCalled = true
-                            onStart()
-                        }
                         mp.start()
                         cont.invokeOnCancellation {
                             try { mp.stop() } catch (_: Exception) {}
@@ -169,18 +170,36 @@ class KokoroTtsEngine(
                 }
 
                 if (!ok) {
-                    if (!isLast) pendingPlay.cancel()
+                    players.drop(idx + 1).release()
                     withContext(Dispatchers.Main) { onError() }
                     return@launch
                 }
-
                 if (isLast) withContext(Dispatchers.Main) { onDone() }
             }
+            if (players.isEmpty()) withContext(Dispatchers.Main) { onDone() }
         }
     }
 
-    // Generates WAV and prepares a MediaPlayer in one background step so
-    // the player is ready to start() the instant the previous chunk ends.
+    // Generates WAV for every chunk sequentially and prepares a MediaPlayer for
+    // each, ready to start() immediately. Returns null if any chunk fails.
+    // Must be called on genDispatcher to ensure single-threaded model access.
+    private fun generateAllChunks(
+        engine: OfflineTts,
+        chunks: List<String>,
+        speechRate: Float,
+    ): List<Pair<MediaPlayer, File>>? {
+        val results = mutableListOf<Pair<MediaPlayer, File>>()
+        for (chunk in chunks) {
+            val r = preparePlayer(engine, chunk, speechRate) ?: run {
+                results.release()
+                return null
+            }
+            results.add(r)
+        }
+        Log.d(TAG, "Generated ${results.size} chunks")
+        return results
+    }
+
     private fun preparePlayer(engine: OfflineTts, chunk: String, speechRate: Float): Pair<MediaPlayer, File>? {
         val wavFile = File(context.cacheDir, "kokoro_${UUID.randomUUID()}.wav")
         return try {
@@ -191,8 +210,7 @@ class KokoroTtsEngine(
                 it.setDataSource(wavFile.absolutePath)
                 it.prepare()
             }
-            val totalMs = System.currentTimeMillis() - t0
-            Log.d(TAG, "chunk[${chunk.length}ch] gen=${genMs}ms prepare+total=${totalMs}ms")
+            Log.d(TAG, "chunk[${chunk.length}ch] gen=${genMs}ms total=${System.currentTimeMillis() - t0}ms")
             mp to wavFile
         } catch (e: Exception) {
             Log.e(TAG, "preparePlayer error: ${e.message}")
@@ -201,8 +219,9 @@ class KokoroTtsEngine(
         }
     }
 
-    // Converts 4-digit years (1000–2099) to their spoken form so Kokoro reads
-    // them naturally. Claude is also instructed to do this, but this is a safety net.
+    private fun List<Pair<MediaPlayer, File>>.release() =
+        forEach { (mp, f) -> try { mp.release() } catch (_: Exception) {}; f.delete() }
+
     private fun normalizeForTts(text: String): String =
         Regex("""\b(1[0-9]{3}|20[0-9]{2})\b""").replace(text) { yearToWords(it.value.toInt()) }
 
@@ -229,9 +248,6 @@ class KokoroTtsEngine(
         }
     }
 
-    // Split narration into sentence-grouped chunks of ≤ MAX_CHUNK_CHARS.
-    // Generation of chunk N+1 runs in parallel with playback of chunk N,
-    // so transitions are gapless as long as generation ≤ playback duration.
     private fun splitIntoChunks(text: String): List<String> {
         val sentences = text.split(Regex("(?<=[.!?])\\s+"))
             .map { it.trim() }.filter { it.isNotEmpty() }
@@ -292,7 +308,6 @@ class KokoroTtsEngine(
         const val DEFAULT_VOICE_ID = 0
         private const val MAX_CHUNK_CHARS = 400
 
-        /** Played when the user picks a new voice in Settings. %s = the voice's first name. */
         const val VOICE_PREVIEW_TEMPLATE =
             "Hi, my name is %s. It would be my pleasure to be your tour guide today."
     }

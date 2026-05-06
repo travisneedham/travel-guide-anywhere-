@@ -181,7 +181,9 @@ class TourGuideService : LifecycleService() {
                 val poi = pois.first()
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
                 prefetchedNarration = poi to narration
-                Log.d(TAG, "Prefetched next narration: ${poi.name}")
+                Log.d(TAG, "Prefetched next narration: ${poi.name} — starting audio pre-generation")
+                val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
+                ttsEngine?.prewarm(narration, speechRate)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -216,12 +218,7 @@ class TourGuideService : LifecycleService() {
                 updateNotification("Now: $topicName")
                 lastLocation?.let { prefetchNextNarration(it) }
             },
-            onEnqueued = {
-                prefetchedNarration?.second?.let { nextText ->
-                    Log.d(TAG, "onEnqueued: prewarm triggered for next narration")
-                    ttsEngine?.prewarm(nextText, speechRate)
-                }
-            },
+            onEnqueued = {},
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
                 val poi = currentNarrationPoi
