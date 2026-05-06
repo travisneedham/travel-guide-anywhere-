@@ -22,6 +22,13 @@ class PoiRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "PoiRepository"
+
+        // OSM place= values that represent administrative/populated-place nodes.
+        // These often carry wikipedia/wikidata tags but are not tour-worthy attractions.
+        private val ADMIN_PLACE_TYPES = setOf(
+            "city", "town", "village", "hamlet", "suburb", "neighbourhood",
+            "county", "state", "country", "region", "district", "municipality", "borough"
+        )
     }
 
     suspend fun fetchPois(
@@ -69,6 +76,12 @@ class PoiRepository @Inject constructor(
         val raw = overpassResponse.elements.size
         val pois = overpassResponse.elements
             .filter { it.tags.containsKey("name") }
+            .filter { element ->
+                // Drop administrative place nodes (cities, towns, counties…).  They carry
+                // wikipedia/wikidata tags and would score 1000+ pts, drowning out actual
+                // attractions like museums and historic sites.
+                element.tags["place"]?.let { it !in ADMIN_PLACE_TYPES } ?: true
+            }
             .map { element -> element.toPlaceOfInterest(location) }
             .distinctBy { it.name }
             .let { list ->
@@ -76,7 +89,7 @@ class PoiRepository @Inject constructor(
                 else list.sortedBy { it.distanceMeters }
             }
 
-        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs")
+        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs (after place filter)")
         if (famousMode && pois.isNotEmpty()) {
             Log.d(TAG, "[famous] Top POIs by fame score: " +
                 pois.take(5).joinToString { "${it.name}(${it.fameScore})" })
@@ -99,12 +112,16 @@ class PoiRepository @Inject constructor(
     // Famous mode: only node+way types, no relations.
     // - wikipedia: node only (way["wikipedia"] is slow — the tag has millions of OSM entries
     //   and evaluating way bounding boxes against all of them is expensive even at small radii)
+    //   Also exclude administrative place nodes (cities, towns, etc.) which have wikipedia tags
+    //   but aren't attractions.
     // - tourism/historic/heritage: node + way only (skip relations — large multipolygons like
     //   university campuses or lakes mapped as relations cause query timeouts)
+    // - result cap 200: enough to find real famous places in metro areas while keeping response
+    //   size manageable; code sorts by fameScore afterwards.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:30];\n" +
         "(\n" +
-        "  node[\"name\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"wikipedia\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
@@ -112,7 +129,7 @@ class PoiRepository @Inject constructor(
         "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
-        "out body center 80;"
+        "out body center 200;"
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
