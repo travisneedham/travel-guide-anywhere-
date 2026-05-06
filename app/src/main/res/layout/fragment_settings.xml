@@ -550,6 +550,14 @@
                     android:text="Copy TTS Logs" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_copy_last_200"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:text="Copy Last 200 Log Lines" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_export_logs"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"

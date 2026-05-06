@@ -265,6 +265,14 @@ class SettingsFragment : Fragment() {
                 Toast.makeText(requireContext(), "TTS logs copied to clipboard", Toast.LENGTH_SHORT).show()
             }
         }
+        binding.btnCopyLast200.setOnClickListener {
+            lifecycleScope.launch {
+                val logs = readLogcat(maxLines = 200)
+                val cm = requireContext().getSystemService(ClipboardManager::class.java)
+                cm.setPrimaryClip(ClipData.newPlainText("travel_guide_logs", logs))
+                Toast.makeText(requireContext(), "Last 200 log lines copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
+        }
         binding.btnExportLogs.setOnClickListener {
             lifecycleScope.launch {
                 val logs = readLogcat(maxLines = null)
