@@ -25,10 +25,8 @@ import kotlin.math.roundToInt
 
 private const val TAG = "TtsExperiment"
 
-// ── Hard-coded test narration (real place, ~309 words, written as spoken prose) ────────────────────
+// ── Hard-coded test narration (real place, ~309 words, written as spoken prose) ──────────────
 // Source: The Sixth Floor Museum at Dealey Plaza, Dallas TX — ~35 miles from Denton TX.
-// This text was crafted to match Claude's touring style: years written out, no markdown,
-// no abbreviations that would confuse the sentence splitter or TTS phonemizer.
 val EXPERIMENT_TEXT = """Standing here in north Texas, we are about thirty-five miles from one of the most significant and somber sites in American history. The Sixth Floor Museum at Dealey Plaza occupies the former Texas School Book Depository building in downtown Dallas, and it preserves the story of President John Fitzgerald Kennedy's assassination on November twenty-second, nineteen sixty-three.
 
 That Friday afternoon, Kennedy's motorcade wound through cheering crowds along Elm Street below the building. Three shots shattered the air. The president slumped forward, fatally wounded. Within hours, the nation and the world would never be quite the same.
@@ -41,31 +39,31 @@ What strikes most visitors is the view from the window itself. Looking down at t
 
 Whether you accept the Warren Commission conclusions or find yourself drawn to the countless alternative theories, the museum respects your intelligence and presents the evidence without steering your conclusions. It is history at its most human and its most haunting."""
 
-// ── Strategy definitions ─────────────────────────────────────────────────────────────────────────────────────────
+// ── Strategy definitions ──────────────────────────────────────────────────────────────────────────────
 data class TtsStrategy(
     val id: String,
     val chunkChars: Int,
-    val preGenAll: Boolean,       // true = generate ALL chunks before playing (no streaming)
-    val thermalBackoff: Boolean,  // sleep 5s between chunks when throttling detected
+    val bufferChunks: Int,      // pre-generate this many chunks before playback (1 = pure stream)
+    val bufferAudioSec: Float,  // OR buffer until this many seconds of audio ready (0 = use bufferChunks)
     val description: String
 )
 
 val STRATEGIES = listOf(
-    TtsStrategy("A", 400, preGenAll = true,  thermalBackoff = false, "Pre-gen ALL  | 400-char chunks"),
-    TtsStrategy("B", 200, preGenAll = true,  thermalBackoff = false, "Pre-gen ALL  | 200-char chunks"),
-    TtsStrategy("C", 400, preGenAll = false, thermalBackoff = false, "Stream ch1+  | 400-char chunks"),
-    TtsStrategy("D", 200, preGenAll = false, thermalBackoff = false, "Stream ch1+  | 200-char chunks"),
-    TtsStrategy("E", 100, preGenAll = false, thermalBackoff = false, "Stream ch1+  | 100-char chunks"),
-    TtsStrategy("F", 200, preGenAll = false, thermalBackoff = true,  "Stream+cool  | 200-char chunks"),
+    TtsStrategy("G", 200, bufferChunks = 1, bufferAudioSec = 0f, "Buffer 1 chunk  | 200-char (stream baseline)"),
+    TtsStrategy("H", 200, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 200-char (recommended)"),
+    TtsStrategy("I", 200, bufferChunks = 3, bufferAudioSec = 0f, "Buffer 3 chunks | 200-char"),
+    TtsStrategy("J", 150, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 150-char"),
+    TtsStrategy("K", 300, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 300-char"),
+    TtsStrategy("L", 200, bufferChunks = 0, bufferAudioSec = 20f, "Buffer 20s audio | 200-char (adaptive)"),
 )
 
-// Two rounds in different orders — lets us see thermal carry-over.
+// Two rounds in different orders — lets us detect thermal carry-over.
 val ROUND_ORDERS = listOf(
-    listOf("A", "B", "C", "D", "E", "F"),  // Round 1: sequential by ID
-    listOf("D", "F", "B", "C", "A", "E"),  // Round 2: shuffled
+    listOf("G", "H", "I", "J", "K", "L"),
+    listOf("I", "L", "H", "K", "G", "J"),
 )
 
-// ── Result data classes ────────────────────────────────────────────────────────────────────────────────────────
+// ── Result data classes ──────────────────────────────────────────────────────────────────────────────────
 
 data class ChunkMeasurement(
     val index: Int,
@@ -79,10 +77,11 @@ data class ChunkMeasurement(
 data class NarrationMeasurement(
     val narrationNumber: Int,  // 1 = first, 2 = second (pre-generated during narration 1 playback)
     val chunks: List<ChunkMeasurement>,
-    val timeToFirstAudioMs: Long,   // wall-clock from start to when first audio could play
+    val effectiveBufN: Int,           // actual chunks pre-buffered before playback starts
+    val timeToFirstAudioMs: Long,     // wall-clock from start to when first audio could play
     val maxPauseMs: Long,
     val totalPauseMs: Long,
-    val timeBetweenPreviousMs: Long, // 0 for narration 1; gap after narration 1 ends before 2 starts
+    val timeBetweenPreviousMs: Long,  // 0 for narration 1; gap after narration 1 ends before 2 starts
     val thermalStartC: Float?,
     val thermalEndC: Float?
 )
@@ -95,7 +94,7 @@ data class StrategyRun(
     val cooledThermalC: Float?     // temperature after cooldown, before this run started
 )
 
-// ── Main experiment class ─────────────────────────────────────────────────────────────────────────────────────
+// ── Main experiment class ─────────────────────────────────────────────────────────────────────────────
 
 class TtsExperiment(
     private val context: Context,
@@ -104,7 +103,6 @@ class TtsExperiment(
     private val onProgress: (percent: Int, status: String) -> Unit
 ) {
 
-    // Thermal sensor: probe multiple paths, remember the one that gives reasonable readings.
     private val thermalPaths = listOf(
         "/sys/class/thermal/thermal_zone0/temp",
         "/sys/class/thermal/thermal_zone1/temp",
@@ -130,7 +128,6 @@ class TtsExperiment(
         if (raw > 1000) raw / 1000f else raw.toFloat()
     } catch (_: Exception) { null }
 
-    // Parse WAV header to get play duration in ms — avoids actual audio playback.
     private fun wavDurationMs(file: File): Long = try {
         file.inputStream().use { s ->
             val h = ByteArray(44).also { s.read(it) }
@@ -143,7 +140,6 @@ class TtsExperiment(
         }
     } catch (_: Exception) { 0L }
 
-    // Better sentence splitter using Android's BreakIterator — handles "Dr.", "J.F.K.", etc.
     private fun splitSentences(text: String): List<String> {
         val bi = BreakIterator.getSentenceInstance(Locale.US)
         bi.setText(text)
@@ -171,13 +167,12 @@ class TtsExperiment(
         return chunks.ifEmpty { listOf(text) }
     }
 
-    // ── Core runner ─────────────────────────────────────────────────────────────────────────────────────
+    // ── Core runner ─────────────────────────────────────────────────────────────────────────────────
 
     suspend fun run(): List<StrategyRun> = withContext(Dispatchers.Default) {
         val tempFiles = mutableListOf<File>()
         val tts = initTts()
 
-        // Count total chunk generations to drive progress bar.
         val totalChunks = ROUND_ORDERS.sumOf { order ->
             order.sumOf { id ->
                 val s = STRATEGIES.first { it.id == id }
@@ -218,32 +213,20 @@ class TtsExperiment(
                     val narResults = mutableListOf<NarrationMeasurement>()
                     val chunks = splitIntoChunks(EXPERIMENT_TEXT, strat.chunkChars)
 
-                    // Run 2 narrations: narration 1 is fresh; narration 2 simulates prewarm.
-                    var narrationPlayWindowMs = 0L  // set after narration 1
+                    // narration 1 = fresh; narration 2 = simulates pre-warm during narration 1.
+                    var narrationPlayWindowMs = 0L
 
                     for (narNum in 1..2) {
                         val thermalStart = readThermalC()
                         val chunkResults = mutableListOf<ChunkMeasurement>()
                         val tempFilesThisNar = mutableListOf<File>()
 
-                        // ── Generate all chunks sequentially (measuring real gen times) ──
                         val genMs = LongArray(chunks.size)
                         val playMs = LongArray(chunks.size)
                         val thermals = arrayOfNulls<Float>(chunks.size)
 
-                        var firstChunkGenMs = 0L
-
                         for (i in chunks.indices) {
                             if (!coroutineContext.isActive) return@withContext results
-
-                            // Thermal backoff for strategy F: if throttling detected, sleep 5s.
-                            if (strat.thermalBackoff && i >= 2 && firstChunkGenMs > 0) {
-                                val recent = genMs.slice(maxOf(0, i - 2) until i).average()
-                                if (recent > firstChunkGenMs * 1.30) {
-                                    Log.d(TAG, "Thermal backoff triggered at chunk $i (gen ${recent.roundToInt()}ms vs first ${firstChunkGenMs}ms)")
-                                    delay(5_000L)
-                                }
-                            }
 
                             val wavFile = File(context.cacheDir, "exp_${UUID.randomUUID()}.wav")
                             tempFilesThisNar += wavFile
@@ -256,73 +239,55 @@ class TtsExperiment(
                             playMs[i] = wavDurationMs(wavFile)
                             thermals[i] = readThermalC()
 
-                            if (i == 0) firstChunkGenMs = genMs[i]
-
                             completedChunks++
                             progress("Round $round · ${strat.id} · Nar $narNum · Chunk ${i + 1}/${chunks.size} (${genMs[i]}ms)")
                         }
 
-                        // ── Compute timing model ─────────────────────────────────────────────────────
-                        // genReady[i] = wall-clock time (relative to gen start) when chunk i is ready.
-                        // For streaming: generation of chunks 1..N starts when chunk 0 starts playing
-                        //   → genReady[i] = genMs[0] + genMs[1] + ... + genMs[i]
-                        // For pre-gen: all chunks generated before any playback.
-                        //   → genReady[i] = genMs[0] + ... + genMs[i]   (same formula, different T_first)
-
+                        // ── Timing model ─────────────────────────────────────────────────────────────────
+                        // Assumes concurrent generation + playback: generation thread runs serially
+                        // from T=0; playback thread starts after N chunks are buffered.
+                        // genReady[i] = cumulative gen time — when chunk i is available.
                         val genReady = LongArray(chunks.size)
                         genReady[0] = genMs[0]
-                        var backoffAccumulated = 0L
-                        for (i in 1 until chunks.size) {
-                            // For strategy F: if we added backoff before generating chunk i,
-                            // it's already reflected in elapsed wall-clock time from our delay() calls.
-                            // But since we measured genMs sequentially, we need to add back the
-                            // conceptual "parallel" offset: backoff delays shift later chunks' ready times.
-                            genReady[i] = genReady[i - 1] + genMs[i]
+                        for (i in 1 until chunks.size) { genReady[i] = genReady[i - 1] + genMs[i] }
+
+                        val effectiveBufN: Int = when {
+                            strat.bufferAudioSec > 0f -> {
+                                val threshMs = (strat.bufferAudioSec * 1000f).toLong()
+                                var audioAccum = 0L
+                                var n = 0
+                                while (n < chunks.size && audioAccum < threshMs) {
+                                    audioAccum += playMs[n]; n++
+                                }
+                                n.coerceIn(1, chunks.size)
+                            }
+                            else -> strat.bufferChunks.coerceIn(1, chunks.size)
                         }
 
-                        val timeToFirstAudio: Long
-                        val pauses = LongArray(chunks.size)  // pauses[0] always 0
+                        val timeToFirstAudio = genReady[effectiveBufN - 1]
+                        val pauses = LongArray(chunks.size)
                         val playStart = LongArray(chunks.size)
                         val playEnd = LongArray(chunks.size)
 
-                        if (strat.preGenAll) {
-                            // T_first = all chunks generated.
-                            timeToFirstAudio = genReady.last()
-                            playStart[0] = timeToFirstAudio
-                            playEnd[0] = playStart[0] + playMs[0]
-                            for (i in 1 until chunks.size) {
-                                pauses[i] = 0L  // all pre-generated, no stalls
-                                playStart[i] = playEnd[i - 1]
-                                playEnd[i] = playStart[i] + playMs[i]
-                            }
-                        } else {
-                            // Streaming: T_first = chunk 0 gen time only.
-                            // Concurrent gen of chunks 1..N starts at T_first.
-                            // genReady[i] (from T=0) = genMs[0] + genMs[1] + ... + genMs[i]
-                            timeToFirstAudio = genMs[0]
-                            playStart[0] = timeToFirstAudio
-                            playEnd[0] = playStart[0] + playMs[0]
-                            for (i in 1 until chunks.size) {
-                                // Chunk i is ready at genReady[i] (absolute from T=0).
-                                val chunkReadyAbsolute = genReady[i]
-                                pauses[i] = maxOf(0L, chunkReadyAbsolute - playEnd[i - 1])
-                                playStart[i] = maxOf(playEnd[i - 1], chunkReadyAbsolute)
-                                playEnd[i] = playStart[i] + playMs[i]
-                            }
+                        playStart[0] = timeToFirstAudio
+                        playEnd[0] = playStart[0] + playMs[0]
+                        for (i in 1 until chunks.size) {
+                            pauses[i] = maxOf(0L, genReady[i] - playEnd[i - 1])
+                            playStart[i] = maxOf(playEnd[i - 1], genReady[i])
+                            playEnd[i] = playStart[i] + playMs[i]
                         }
 
                         val narPlayWindowMs = if (chunks.isEmpty()) 0L else playEnd.last() - playStart[0]
                         val totalPauseMs = pauses.sum()
                         val maxPauseMs = pauses.max()
 
-                        // T_between: how long we'd wait between narration 1 ending and narration 2 starting.
-                        // Prewarm starts when narration 1 begins playing. Window = narPlayWindowMs.
+                        // T_between: nar2 pre-gen starts when nar1 begins playing.
+                        // T_between = max(0, time until nar2 bufferN ready - nar1 play window).
                         val timeBetween = if (narNum == 1) {
                             narrationPlayWindowMs = narPlayWindowMs
                             0L
                         } else {
-                            val nar2TotalGen = genMs.sum()
-                            maxOf(0L, nar2TotalGen - narrationPlayWindowMs)
+                            maxOf(0L, genReady[effectiveBufN - 1] - narrationPlayWindowMs)
                         }
 
                         for (i in chunks.indices) {
@@ -340,6 +305,7 @@ class TtsExperiment(
                         narResults += NarrationMeasurement(
                             narrationNumber = narNum,
                             chunks = chunkResults,
+                            effectiveBufN = effectiveBufN,
                             timeToFirstAudioMs = timeToFirstAudio,
                             maxPauseMs = maxPauseMs,
                             totalPauseMs = totalPauseMs,
@@ -348,11 +314,9 @@ class TtsExperiment(
                             thermalEndC = thermalEnd
                         )
 
-                        // Clean up WAV files immediately to free storage.
                         tempFilesThisNar.forEach { it.delete() }
                     }
 
-                    // Thermal drift: ratio of last-3 avg gen time to first chunk gen time.
                     val allGenTimes = narResults.flatMap { n -> n.chunks.map { it.genMs } }
                     val firstGen = allGenTimes.firstOrNull()?.toFloat() ?: 1f
                     val last3Avg = allGenTimes.takeLast(3).average().toFloat()
@@ -390,14 +354,14 @@ class TtsExperiment(
         )
     )
 
-    // ── Results formatter ────────────────────────────────────────────────────────────────────────────────────
+    // ── Results formatter ────────────────────────────────────────────────────────────────────────────────
 
     fun formatResults(runs: List<StrategyRun>): String {
         val sb = StringBuilder()
         val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
 
         sb.appendLine("═══════════════════════════════════════════════════════════")
-        sb.appendLine("  TRAVEL GUIDE — TTS STRATEGY EXPERIMENT RESULTS")
+        sb.appendLine("  TRAVEL GUIDE — TTS BUFFER EXPERIMENT RESULTS")
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine("Date          : $ts")
         sb.appendLine("Android       : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -405,12 +369,23 @@ class TtsExperiment(
         sb.appendLine("Kokoro voice  : SID $voiceSid")
         sb.appendLine("Test text     : ${EXPERIMENT_TEXT.split("\\s+".toRegex()).size} words / ${EXPERIMENT_TEXT.length} chars")
         sb.appendLine()
-        sb.appendLine("STRATEGIES")
-        STRATEGIES.forEach { sb.appendLine("  ${it.id}: ${it.description}") }
+        sb.appendLine("HYPOTHESIS")
+        sb.appendLine("  Kokoro generates at ~1.0-1.5× real-time. Pure streaming (buffer=1) causes")
+        sb.appendLine("  mid-narration pauses; full pre-gen (buffer=all) causes a long wait.")
+        sb.appendLine("  Buffering N chunks before playback — while generating the rest concurrently")
+        sb.appendLine("  on a background thread — should minimise both T_first and mid-narration pauses.")
         sb.appendLine()
-        sb.appendLine("NOTE: Timing model simulates concurrent generation mathematically.")
+        sb.appendLine("STRATEGIES")
+        STRATEGIES.forEach { s ->
+            val bufDesc = if (s.bufferAudioSec > 0f) "adaptive: buffer ${s.bufferAudioSec}s audio"
+                          else "buffer ${s.bufferChunks} chunk(s) before playback"
+            sb.appendLine("  ${s.id}: ${s.description}  [$bufDesc]")
+        }
+        sb.appendLine()
+        sb.appendLine("NOTE: Timing model assumes concurrent generation + playback (background thread).")
         sb.appendLine("      'Pause' = how long playback would stall waiting for next chunk.")
         sb.appendLine("      'T_between' does NOT include Claude API latency (~5-15s real overhead).")
+        sb.appendLine("      'bufN' = effective buffer count used for that narration.")
         sb.appendLine()
 
         val rounds = runs.groupBy { it.round }
@@ -427,8 +402,10 @@ class TtsExperiment(
                 for (nar in run.narrations) {
                     val label = if (nar.narrationNumber == 1) "Narration 1 (fresh)" else "Narration 2 (prewarm)"
                     sb.appendLine("│")
-                    sb.appendLine("│  ── $label ──")
-                    nar.thermalStartC?.let { sb.appendLine("│     Thermal: ${"%.1f".format(it)}°C → ${nar.thermalEndC?.let { e -> "%.1f".format(e) + "°C" } ?: "?"}") }
+                    sb.appendLine("│  ── $label  [bufN=${nar.effectiveBufN}] ──")
+                    nar.thermalStartC?.let {
+                        sb.appendLine("│     Thermal: ${"%.1f".format(it)}°C → ${nar.thermalEndC?.let { e -> "%.1f".format(e) + "°C" } ?: "?"}")
+                    }
                     sb.appendLine("│     Chunks  : ${nar.chunks.size} (chars: ${nar.chunks.joinToString(" ") { it.charCount.toString() }})")
                     sb.appendLine("│     Gen(s)  : ${nar.chunks.joinToString(" ") { "%.1f".format(it.genMs / 1000f) }}")
                     sb.appendLine("│     Play(s) : ${nar.chunks.joinToString(" ") { "%.1f".format(it.playMs / 1000f) }}")
@@ -452,7 +429,6 @@ class TtsExperiment(
             }
         }
 
-        // Summary table
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine("  SUMMARY TABLE")
         sb.appendLine("═══════════════════════════════════════════════════════════")
@@ -483,7 +459,6 @@ class TtsExperiment(
         sb.appendLine("Columns show R1 / R2 values.")
         sb.appendLine()
 
-        // Scoring
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine("  WEIGHTED SCORE  (lower = better)")
         sb.appendLine("  T_first weight: 1   MaxPause weight: 3   T_between weight: 2")
