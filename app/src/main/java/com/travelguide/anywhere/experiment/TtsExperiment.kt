@@ -532,7 +532,7 @@ class TtsExperiment(
 
         scores.sortBy { it.score }
         for ((rank, s) in scores.withIndex()) {
-            val pauseLabel = if (s.maxPause == 0f) "✓ ZERO pauses" else "⚠ MaxPause=${\"%.1f\".format(s.maxPause)}s"
+            val pauseLabel = if (s.maxPause == 0f) "✓ ZERO pauses" else "⚠ MaxPause=${"%.1f".format(s.maxPause)}s"
             val label = if (rank == 0) "★ BEST" else "  ${rank + 1}   "
             sb.appendLine("$label  ${s.id}: score=${"%.1f".format(s.score)}  $pauseLabel  T_first=${"%.1f".format(s.tFirst)}s  T_between=${"%.1f".format(s.tBetween)}s")
         }
