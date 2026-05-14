@@ -2,12 +2,20 @@ package com.travelguide.anywhere.ui.main
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -28,7 +36,9 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.travelguide.anywhere.experiment.TtsExperiment
 import com.travelguide.anywhere.service.KokoroTtsEngine
+import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +46,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -71,6 +84,7 @@ class SettingsFragment : Fragment() {
         loadVoiceSettings()
         loadPrompts()
         setupDiagnostics()
+        setupExperiment()
     }
 
     private fun setupToolbar() {
@@ -239,6 +253,120 @@ class SettingsFragment : Fragment() {
                 }
                 false
             }
+        }
+    }
+
+    private fun setupExperiment() {
+        binding.btnRunExperiment.setOnClickListener {
+            if (!kokoroModelManager.isReady) {
+                Toast.makeText(requireContext(), "Kokoro model not downloaded — download it first in the Voice section", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            if (viewModel.tourState.value != TourState.IDLE) {
+                Toast.makeText(requireContext(), "Stop the tour before running the experiment", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            startExperiment()
+        }
+    }
+
+    private fun startExperiment() {
+        val ctx = requireContext()
+        val pm = ctx.getSystemService(PowerManager::class.java)
+        val wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "TravelGuide:ExperimentWakeLock"
+        ).also { it.acquire(90 * 60 * 1000L) }
+
+        val progressBar = ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        val tvStatus = TextView(ctx).apply {
+            text = "Initializing Kokoro TTS engine…"
+            setPadding(0, 16, 0, 0)
+        }
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(64, 40, 64, 16)
+            addView(progressBar)
+            addView(tvStatus)
+        }
+
+        var experimentJob: kotlinx.coroutines.Job? = null
+        val dialog = MaterialAlertDialogBuilder(ctx)
+            .setTitle("Running TTS Experiment")
+            .setMessage("This will take ~60 minutes. Keep the phone plugged in.")
+            .setView(layout)
+            .setCancelable(false)
+            .setNegativeButton("Cancel") { _, _ ->
+                experimentJob?.cancel()
+                wakeLock.runCatching { if (isHeld) release() }
+            }
+            .show()
+
+        val voiceSid = prefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, MainFragment.DEFAULT_KOKORO_VOICE_SID)
+        val modelDir = kokoroModelManager.modelDir
+
+        val experiment = TtsExperiment(ctx, modelDir, voiceSid) { percent, status ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                if (dialog.isShowing) {
+                    progressBar.progress = percent
+                    tvStatus.text = status
+                }
+            }
+        }
+
+        experimentJob = lifecycleScope.launch {
+            val results = try {
+                experiment.run()
+            } catch (e: Exception) {
+                if (!isActive) {
+                    wakeLock.runCatching { if (isHeld) release() }
+                    return@launch
+                }
+                wakeLock.runCatching { if (isHeld) release() }
+                if (dialog.isShowing) dialog.dismiss()
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Experiment Failed")
+                    .setMessage(e.message ?: "Unknown error")
+                    .setPositiveButton("OK", null)
+                    .show()
+                return@launch
+            }
+
+            wakeLock.runCatching { if (isHeld) release() }
+
+            val report = experiment.formatResults(results)
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val outFile = withContext(Dispatchers.IO) {
+                val outDir = ctx.getExternalFilesDir("Experiment") ?: ctx.filesDir
+                outDir.mkdirs()
+                File(outDir, "tts_experiment_$ts.txt").also { it.writeText(report) }
+            }
+
+            if (dialog.isShowing) dialog.dismiss()
+
+            MaterialAlertDialogBuilder(ctx)
+                .setTitle("Experiment Complete!")
+                .setMessage(
+                    "Results saved to:\n${outFile.absolutePath}\n\n" +
+                    "Open a file manager and navigate to:\n" +
+                    "Android/data/com.travelguide.anywhere/files/Experiment/"
+                )
+                .setPositiveButton("Share File") { _, _ ->
+                    val uri = FileProvider.getUriForFile(
+                        ctx, "${ctx.packageName}.fileprovider", outFile
+                    )
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "TTS Experiment $ts")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Share Experiment Results"))
+                }
+                .setNegativeButton("Done", null)
+                .show()
         }
     }
 
