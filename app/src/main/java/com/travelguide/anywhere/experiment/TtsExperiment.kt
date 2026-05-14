@@ -40,7 +40,8 @@ What strikes most visitors is the view from the window itself. Looking down at t
 Whether you accept the Warren Commission conclusions or find yourself drawn to the countless alternative theories, the museum respects your intelligence and presents the evidence without steering your conclusions. It is history at its most human and its most haunting."""
 
 // ── Strategy definitions ──────────────────────────────────────────────────────────────────────
-// bufferChunks = 99 is a sentinel meaning "buffer ALL chunks" (coerced to chunks.size).
+// bufferChunks = 99  → pre-gen ALL chunks before playback
+// bufferChunks = -1  → adaptive: measure gen/play ratio from early chunks, compute minimum bufN
 data class TtsStrategy(
     val id: String,
     val chunkChars: Int,
@@ -54,14 +55,14 @@ val STRATEGIES = listOf(
     TtsStrategy("N", 200, bufferChunks =  4, bufferAudioSec = 0f, "Buffer 4 chunks | 200-char (key candidate)"),
     TtsStrategy("O", 200, bufferChunks =  5, bufferAudioSec = 0f, "Buffer 5 chunks | 200-char (safety margin)"),
     TtsStrategy("P", 150, bufferChunks =  4, bufferAudioSec = 0f, "Buffer 4 chunks | 150-char"),
-    TtsStrategy("Q", 150, bufferChunks =  3, bufferAudioSec = 0f, "Buffer 3 chunks | 150-char"),
     TtsStrategy("R", 200, bufferChunks = 99, bufferAudioSec = 0f, "Pre-gen ALL     | 200-char (zero-pause reference)"),
+    TtsStrategy("S", 200, bufferChunks = -1, bufferAudioSec = 0f, "Adaptive buffer  | 200-char (auto-calibrate)"),
 )
 
 // Two rounds in different orders — detects thermal carry-over effects.
 val ROUND_ORDERS = listOf(
-    listOf("M", "N", "O", "P", "Q", "R"),
-    listOf("O", "R", "N", "Q", "M", "P"),
+    listOf("M", "N", "O", "P", "R", "S"),
+    listOf("O", "S", "N", "R", "M", "P"),
 )
 
 // ── Result data classes ───────────────────────────────────────────────────────────────────────
@@ -168,6 +169,46 @@ class TtsExperiment(
         return chunks.ifEmpty { listOf(text) }
     }
 
+    // ── Adaptive buffer sizing ────────────────────────────────────────────────────────────────
+    // Uses measured gen/play ratios from the first `measured` chunks to project remaining chunk
+    // gen times, then simulates the timing model. Returns the minimum bufN that predicts zero
+    // mid-narration pauses given the current thermal state.
+    private fun computeAdaptiveBufN(
+        genMs: LongArray,
+        playMs: LongArray,
+        measured: Int       // how many chunks have been measured so far
+    ): Int {
+        val chunkCount = genMs.size
+        if (measured == 0) return 1
+
+        // Average gen/play ratio from measured chunks (proxy for thermal load).
+        val avgRatio = (0 until measured).map { i ->
+            if (playMs[i] > 0) genMs[i].toDouble() / playMs[i].toDouble() else 1.0
+        }.average()
+
+        // Project remaining chunk gen times using avgRatio × their play durations.
+        val projGenMs = LongArray(chunkCount) { i ->
+            if (i < measured) genMs[i] else (playMs[i] * avgRatio).toLong()
+        }
+
+        val projGenReady = LongArray(chunkCount)
+        projGenReady[0] = projGenMs[0]
+        for (i in 1 until chunkCount) { projGenReady[i] = projGenReady[i - 1] + projGenMs[i] }
+
+        // Find smallest bufN that yields zero pauses in the projected timing model.
+        for (n in 1..chunkCount) {
+            val tFirst = projGenReady[n - 1]
+            var prevPlayEnd = tFirst + playMs[0]
+            var wouldHavePause = false
+            for (i in 1 until chunkCount) {
+                if (projGenReady[i] > prevPlayEnd) { wouldHavePause = true; break }
+                prevPlayEnd = maxOf(prevPlayEnd, projGenReady[i]) + playMs[i]
+            }
+            if (!wouldHavePause) return n
+        }
+        return chunkCount
+    }
+
     // ── Core runner ───────────────────────────────────────────────────────────────────────────
 
     suspend fun run(): List<StrategyRun> = withContext(Dispatchers.Default) {
@@ -262,6 +303,9 @@ class TtsExperiment(
                                 }
                                 n.coerceIn(1, chunks.size)
                             }
+                            strat.bufferChunks == -1 ->
+                                // Adaptive: use all measured gen/play data to project minimum safe bufN.
+                                computeAdaptiveBufN(genMs, playMs, measured = chunks.size)
                             else -> strat.bufferChunks.coerceIn(1, chunks.size)
                         }
 
@@ -381,7 +425,8 @@ class TtsExperiment(
         sb.appendLine("STRATEGIES")
         STRATEGIES.forEach { s ->
             val bufDesc = when {
-                s.bufferAudioSec > 0f -> "adaptive: buffer ${s.bufferAudioSec}s audio"
+                s.bufferAudioSec > 0f -> "buffer ${s.bufferAudioSec}s audio before playback"
+                s.bufferChunks == -1  -> "adaptive: compute bufN from measured gen/play ratio"
                 s.bufferChunks >= 99  -> "pre-generate ALL chunks before playback"
                 else -> "buffer ${s.bufferChunks} chunk(s) before playback"
             }
