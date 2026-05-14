@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.MediaStore
+import android.view.WindowManager
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -272,6 +273,9 @@ class SettingsFragment : Fragment() {
 
     private fun startExperiment() {
         val ctx = requireContext()
+        val window = requireActivity().window
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         val pm = ctx.getSystemService(PowerManager::class.java)
         val wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "TravelGuide:ExperimentWakeLock"
@@ -301,6 +305,7 @@ class SettingsFragment : Fragment() {
             .setNegativeButton("Cancel") { _, _ ->
                 experimentJob?.cancel()
                 wakeLock.runCatching { if (isHeld) release() }
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             .show()
 
@@ -322,9 +327,11 @@ class SettingsFragment : Fragment() {
             } catch (e: Exception) {
                 if (!isActive) {
                     wakeLock.runCatching { if (isHeld) release() }
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     return@launch
                 }
                 wakeLock.runCatching { if (isHeld) release() }
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 if (dialog.isShowing) dialog.dismiss()
                 MaterialAlertDialogBuilder(ctx)
                     .setTitle("Experiment Failed")
@@ -335,6 +342,7 @@ class SettingsFragment : Fragment() {
             }
 
             wakeLock.runCatching { if (isHeld) release() }
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
             val report = experiment.formatResults(results)
             val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
