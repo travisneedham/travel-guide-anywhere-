@@ -39,7 +39,8 @@ What strikes most visitors is the view from the window itself. Looking down at t
 
 Whether you accept the Warren Commission conclusions or find yourself drawn to the countless alternative theories, the museum respects your intelligence and presents the evidence without steering your conclusions. It is history at its most human and its most haunting."""
 
-// ── Strategy definitions ──────────────────────────────────────────────────────────────────────────────
+// ── Strategy definitions ──────────────────────────────────────────────────────────────────────
+// bufferChunks = 99 is a sentinel meaning "buffer ALL chunks" (coerced to chunks.size).
 data class TtsStrategy(
     val id: String,
     val chunkChars: Int,
@@ -49,21 +50,21 @@ data class TtsStrategy(
 )
 
 val STRATEGIES = listOf(
-    TtsStrategy("G", 200, bufferChunks = 1, bufferAudioSec = 0f, "Buffer 1 chunk  | 200-char (stream baseline)"),
-    TtsStrategy("H", 200, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 200-char (recommended)"),
-    TtsStrategy("I", 200, bufferChunks = 3, bufferAudioSec = 0f, "Buffer 3 chunks | 200-char"),
-    TtsStrategy("J", 150, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 150-char"),
-    TtsStrategy("K", 300, bufferChunks = 2, bufferAudioSec = 0f, "Buffer 2 chunks | 300-char"),
-    TtsStrategy("L", 200, bufferChunks = 0, bufferAudioSec = 20f, "Buffer 20s audio | 200-char (adaptive)"),
+    TtsStrategy("M", 200, bufferChunks =  3, bufferAudioSec = 0f, "Buffer 3 chunks | 200-char (baseline = prev best)"),
+    TtsStrategy("N", 200, bufferChunks =  4, bufferAudioSec = 0f, "Buffer 4 chunks | 200-char (key candidate)"),
+    TtsStrategy("O", 200, bufferChunks =  5, bufferAudioSec = 0f, "Buffer 5 chunks | 200-char (safety margin)"),
+    TtsStrategy("P", 150, bufferChunks =  4, bufferAudioSec = 0f, "Buffer 4 chunks | 150-char"),
+    TtsStrategy("Q", 150, bufferChunks =  3, bufferAudioSec = 0f, "Buffer 3 chunks | 150-char"),
+    TtsStrategy("R", 200, bufferChunks = 99, bufferAudioSec = 0f, "Pre-gen ALL     | 200-char (zero-pause reference)"),
 )
 
-// Two rounds in different orders — lets us detect thermal carry-over.
+// Two rounds in different orders — detects thermal carry-over effects.
 val ROUND_ORDERS = listOf(
-    listOf("G", "H", "I", "J", "K", "L"),
-    listOf("I", "L", "H", "K", "G", "J"),
+    listOf("M", "N", "O", "P", "Q", "R"),
+    listOf("O", "R", "N", "Q", "M", "P"),
 )
 
-// ── Result data classes ──────────────────────────────────────────────────────────────────────────────────
+// ── Result data classes ───────────────────────────────────────────────────────────────────────
 
 data class ChunkMeasurement(
     val index: Int,
@@ -94,7 +95,7 @@ data class StrategyRun(
     val cooledThermalC: Float?     // temperature after cooldown, before this run started
 )
 
-// ── Main experiment class ─────────────────────────────────────────────────────────────────────────────
+// ── Main experiment class ─────────────────────────────────────────────────────────────────────
 
 class TtsExperiment(
     private val context: Context,
@@ -167,7 +168,7 @@ class TtsExperiment(
         return chunks.ifEmpty { listOf(text) }
     }
 
-    // ── Core runner ─────────────────────────────────────────────────────────────────────────────────
+    // ── Core runner ───────────────────────────────────────────────────────────────────────────
 
     suspend fun run(): List<StrategyRun> = withContext(Dispatchers.Default) {
         val tempFiles = mutableListOf<File>()
@@ -243,7 +244,7 @@ class TtsExperiment(
                             progress("Round $round · ${strat.id} · Nar $narNum · Chunk ${i + 1}/${chunks.size} (${genMs[i]}ms)")
                         }
 
-                        // ── Timing model ─────────────────────────────────────────────────────────────────
+                        // ── Timing model ─────────────────────────────────────────────────────
                         // Assumes concurrent generation + playback: generation thread runs serially
                         // from T=0; playback thread starts after N chunks are buffered.
                         // genReady[i] = cumulative gen time — when chunk i is available.
@@ -354,14 +355,14 @@ class TtsExperiment(
         )
     )
 
-    // ── Results formatter ────────────────────────────────────────────────────────────────────────────────
+    // ── Results formatter ─────────────────────────────────────────────────────────────────────
 
     fun formatResults(runs: List<StrategyRun>): String {
         val sb = StringBuilder()
         val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
 
         sb.appendLine("═══════════════════════════════════════════════════════════")
-        sb.appendLine("  TRAVEL GUIDE — TTS BUFFER EXPERIMENT RESULTS")
+        sb.appendLine("  TRAVEL GUIDE — TTS ZERO-PAUSE EXPERIMENT RESULTS")
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine("Date          : $ts")
         sb.appendLine("Android       : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -369,16 +370,21 @@ class TtsExperiment(
         sb.appendLine("Kokoro voice  : SID $voiceSid")
         sb.appendLine("Test text     : ${EXPERIMENT_TEXT.split("\\s+".toRegex()).size} words / ${EXPERIMENT_TEXT.length} chars")
         sb.appendLine()
-        sb.appendLine("HYPOTHESIS")
-        sb.appendLine("  Kokoro generates at ~1.0-1.5× real-time. Pure streaming (buffer=1) causes")
-        sb.appendLine("  mid-narration pauses; full pre-gen (buffer=all) causes a long wait.")
-        sb.appendLine("  Buffering N chunks before playback — while generating the rest concurrently")
-        sb.appendLine("  on a background thread — should minimise both T_first and mid-narration pauses.")
+        sb.appendLine("CONTEXT")
+        sb.appendLine("  Previous experiment (G-L) showed buffer-3/200-char (strategy I) was best at")
+        sb.appendLine("  MaxPause=5.6s, but one pause remained per narration at the 213-char penultimate")
+        sb.appendLine("  chunk. Math from that data predicts buffer-4 eliminates all pauses: at ~44s")
+        sb.appendLine("  T_first the playback thread stays ~7s ahead of the gen thread through chunk 11.")
+        sb.appendLine()
+        sb.appendLine("PRIORITY: MaxPause = 0. T_first and T_between are accepted costs.")
         sb.appendLine()
         sb.appendLine("STRATEGIES")
         STRATEGIES.forEach { s ->
-            val bufDesc = if (s.bufferAudioSec > 0f) "adaptive: buffer ${s.bufferAudioSec}s audio"
-                          else "buffer ${s.bufferChunks} chunk(s) before playback"
+            val bufDesc = when {
+                s.bufferAudioSec > 0f -> "adaptive: buffer ${s.bufferAudioSec}s audio"
+                s.bufferChunks >= 99  -> "pre-generate ALL chunks before playback"
+                else -> "buffer ${s.bufferChunks} chunk(s) before playback"
+            }
             sb.appendLine("  ${s.id}: ${s.description}  [$bufDesc]")
         }
         sb.appendLine()
@@ -461,7 +467,8 @@ class TtsExperiment(
 
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine("  WEIGHTED SCORE  (lower = better)")
-        sb.appendLine("  T_first weight: 1   MaxPause weight: 3   T_between weight: 2")
+        sb.appendLine("  PRIORITY — MaxPause weight: 10   T_first weight: 1   T_between weight: 1")
+        sb.appendLine("  Strategies with MaxPause=0 rank purely by T_first.")
         sb.appendLine("═══════════════════════════════════════════════════════════")
         sb.appendLine()
 
@@ -474,14 +481,15 @@ class TtsExperiment(
             val avgTFirst   = stratRuns.mapNotNull { it.narrations.firstOrNull()?.timeToFirstAudioMs?.toFloat() }.average().toFloat() / 1000f
             val avgMaxPause = stratRuns.mapNotNull { it.narrations.maxOfOrNull { n -> n.maxPauseMs.toFloat() } }.average().toFloat() / 1000f
             val avgTBetween = stratRuns.mapNotNull { it.narrations.drop(1).firstOrNull()?.timeBetweenPreviousMs?.toFloat() }.average().toFloat() / 1000f
-            val weighted = avgTFirst * 1f + avgMaxPause * 3f + avgTBetween * 2f
+            val weighted = avgMaxPause * 10f + avgTFirst * 1f + avgTBetween * 1f
             scores += Score(id, weighted, avgTFirst, avgMaxPause, avgTBetween)
         }
 
         scores.sortBy { it.score }
         for ((rank, s) in scores.withIndex()) {
+            val pauseLabel = if (s.maxPause == 0f) "✓ ZERO pauses" else "⚠ MaxPause=${\"%.1f\".format(s.maxPause)}s"
             val label = if (rank == 0) "★ BEST" else "  ${rank + 1}   "
-            sb.appendLine("$label  ${s.id}: score=${"%.1f".format(s.score)}  (T_first=${"%.1f".format(s.tFirst)}s  MaxPause=${"%.1f".format(s.maxPause)}s  T_between=${"%.1f".format(s.tBetween)}s)")
+            sb.appendLine("$label  ${s.id}: score=${"%.1f".format(s.score)}  $pauseLabel  T_first=${"%.1f".format(s.tFirst)}s  T_between=${"%.1f".format(s.tBetween)}s")
         }
 
         sb.appendLine()
