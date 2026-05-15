@@ -46,6 +46,10 @@ class KokoroTtsEngine(
     private var mediaPlayer: MediaPlayer? = null
     private var isPaused = false
 
+    // Rate applied to every new MediaPlayer so mid-narration slider changes take effect on
+    // all subsequent chunks, not just the one that was playing when setSpeed() was called.
+    @Volatile private var currentPlayRate: Float = 1.0f
+
     // Pre-running adaptive pipeline for the NEXT narration. Generation begins while the
     // current narration is still playing, so by speak() time the ready-trigger has usually
     // already fired and playback can start immediately (T_between ≈ 0).
@@ -81,9 +85,10 @@ class KokoroTtsEngine(
     }
 
     override fun prewarm(text: String, speechRate: Float) {
-        if (prewarmedPipeline?.text == text) return
+        val existing = prewarmedPipeline
+        if (existing != null && existing.text == text && existing.speechRate == speechRate) return
         val engine = tts ?: return
-        prewarmedPipeline?.let { it.cancel("replaced by new prewarm") }
+        existing?.cancel("replaced by new prewarm")
         prewarmedPipeline = startPipeline(engine, text, speechRate, labelPrefix = "prewarm")
     }
 
@@ -105,11 +110,13 @@ class KokoroTtsEngine(
             onError(); return
         }
 
-        val pipeline = if (candidate != null && candidate.text == text) {
+        val pipeline = if (candidate != null && candidate.text == text && candidate.speechRate == speechRate) {
             candidate.diag.markConsumedFromPrewarm()
             candidate
         } else {
-            candidate?.cancel("speak text differs from prewarmed text")
+            // Either different text or different speed (user moved slider). Discard prewarmed
+            // audio — it was generated at the wrong rate so the adaptive projection is invalid.
+            candidate?.cancel("prewarmed rate=${candidate?.speechRate} != requested=$speechRate")
             startPipeline(engine, text, speechRate, labelPrefix = "fresh")
         }
 
@@ -157,7 +164,7 @@ class KokoroTtsEngine(
         )
         Log.i(TAG, "[TTS-DIAG] pipeline start label=$labelPrefix chars=${text.length} chunks=${chunks.size} sizes=${diag.chunkChars}")
 
-        val pipeline = NarrationPipeline(text, channel, trigger, diag)
+        val pipeline = NarrationPipeline(text, speechRate, channel, trigger, diag)
         pipeline.genJob = engineScope.launch(genDispatcher) {
             val t0 = SystemClock.elapsedRealtime()
             val chars = IntArray(chunks.size) { chunks[it].length }
@@ -266,6 +273,10 @@ class KokoroTtsEngine(
             }
             mediaPlayer?.release()
             mediaPlayer = mp
+            val rate = currentPlayRate
+            if (rate != 1.0f) {
+                try { mp.playbackParams = android.media.PlaybackParams().setSpeed(rate.coerceAtLeast(0.1f)) } catch (_: Exception) {}
+            }
             mp.start()
             cont.invokeOnCancellation {
                 try { mp.stop() } catch (_: Exception) {}
@@ -402,10 +413,20 @@ class KokoroTtsEngine(
     }
 
     override fun setSpeed(rate: Float) {
+        currentPlayRate = rate
         try {
             mediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(rate.coerceAtLeast(0.1f))
         } catch (e: Exception) {
             Log.w(TAG, "setSpeed failed: ${e.message}")
+        }
+        // If the prewarmed pipeline was generated at a different rate, cancel it now rather
+        // than discovering the mismatch later. It will be regenerated at the new rate when
+        // speak() is called after the current narration ends.
+        val pw = prewarmedPipeline
+        if (pw != null && pw.speechRate != rate) {
+            Log.i(TAG, "setSpeed: discarding prewarm (was ${pw.speechRate}×, now $rate×)")
+            pw.cancel("speed changed during playback")
+            prewarmedPipeline = null
         }
     }
 
@@ -449,6 +470,7 @@ class KokoroTtsEngine(
 
     private class NarrationPipeline(
         val text: String,
+        val speechRate: Float,
         val channel: Channel<ChunkPlayer>,
         val readyTrigger: CompletableDeferred<Long>,
         val diag: TtsDiagnostics,
