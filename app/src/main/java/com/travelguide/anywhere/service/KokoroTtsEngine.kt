@@ -552,9 +552,11 @@ class KokoroTtsEngine(
 
         // Inflates the projected gen/play ratio for unmeasured chunks. Early-narration
         // chunks generate fast (cool CPU); later chunks slow down from thermal throttling,
-        // so a backward-looking average is optimistic. 1.15 = assume future chunks run 15%
-        // slower than the lifetime average so far.
-        private const val SAFETY_MARGIN = 1.15
+        // so a backward-looking average is optimistic. 1.5 = assume future chunks run 50%
+        // slower than the lifetime average so far. Field data showed chunk ratios rising
+        // from 0.75 to 1.40 over a single narration on a throttled Samsung SM-F766U1,
+        // so 1.15 was insufficient; 1.5 targets bufN≈2-3 which eliminates the pause.
+        private const val SAFETY_MARGIN = 1.5
 
         // Fallback when no measured play data exists yet — average Kokoro play ms per char.
         private const val DEFAULT_PLAY_MS_PER_CHAR = 55.0

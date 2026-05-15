@@ -99,12 +99,17 @@ class PoiRepository @Inject constructor(
     }
 
     // Nearby mode: all interesting POI types sorted by distance (closest first).
+    // Uses node+way only (no relation) — relations are complex multipolygons that cause
+    // 30-second Overpass timeouts at large radii, same reason as buildFamousQuery.
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:25];\n" +
         "(\n" +
-        "  nwr[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"tourism\"~\"attraction|museum|artwork|viewpoint\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  nwr[\"name\"][\"leisure\"=\"park\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"tourism\"~\"attraction|museum|artwork|viewpoint\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"tourism\"~\"attraction|museum|artwork|viewpoint\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"leisure\"=\"park\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"leisure\"=\"park\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"amenity\"=\"place_of_worship\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
         "out body center;"

@@ -246,6 +246,7 @@ class MainFragment : Fragment() {
                 launch { viewModel.mentionedPlaces.collect { updateMentionedList(it) } }
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                    TourGuideService.errorMessage.value = null  // consume — prevents re-toast on lifecycle restart
                 }}}
                 launch { viewModel.currentPoiImage.collect { imageUrl ->
                     if (imageUrl != null) {
