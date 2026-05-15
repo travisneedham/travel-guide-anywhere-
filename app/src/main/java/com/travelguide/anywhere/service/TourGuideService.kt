@@ -20,6 +20,7 @@ import com.google.android.gms.location.Priority
 import com.travelguide.anywhere.MainActivity
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
+import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiImageRepository
@@ -40,6 +41,7 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var poiRepository: PoiRepository
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
+    @Inject lateinit var narrationHistoryStore: NarrationHistoryStore
     @Inject lateinit var kokoroModelManager: KokoroModelManager
     @Inject lateinit var poiImageRepository: PoiImageRepository
 
@@ -77,6 +79,7 @@ class TourGuideService : LifecycleService() {
             ACTION_START -> {
                 initTtsEngine()
                 mentionedPlacesStore.load()
+                narrationHistoryStore.load()
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
                 famousMode = intent.getBooleanExtra(EXTRA_FAMOUS_MODE, false)

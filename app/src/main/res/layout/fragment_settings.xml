@@ -532,6 +532,29 @@
                 android:paddingBottom="8dp"
                 android:visibility="gone">
 
+                <TextView
+                    android:id="@+id/tv_history_expiry_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Narration memory: 30 days"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="4dp" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/slider_history_expiry"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:valueFrom="5"
+                    android:valueTo="90"
+                    android:stepSize="5"
+                    android:value="30"
+                    android:layout_marginBottom="8dp"
+                    app:thumbColor="@color/accent"
+                    app:trackColorActive="@color/accent"
+                    app:trackColorInactive="@color/stroke" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_clear_history"
                     style="@style/Widget.Material3.Button.TextButton"

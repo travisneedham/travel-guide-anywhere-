@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
+import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
@@ -18,7 +19,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     application: Application,
-    private val mentionedPlacesStore: MentionedPlacesStore
+    private val mentionedPlacesStore: MentionedPlacesStore,
+    private val narrationHistoryStore: NarrationHistoryStore,
 ) : AndroidViewModel(application) {
 
     val tourState: StateFlow<TourState> = TourGuideService.tourState
@@ -89,6 +91,7 @@ class MainViewModel @Inject constructor(
     fun clearHistory() {
         viewModelScope.launch {
             mentionedPlacesStore.clear()
+            narrationHistoryStore.clear()
             TourGuideService.mentionedPlaces.value = emptyList()
         }
     }

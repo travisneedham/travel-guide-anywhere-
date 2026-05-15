@@ -30,6 +30,7 @@ import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.databinding.FragmentSettingsBinding
+import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
@@ -390,12 +391,20 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupDiagnostics() {
+        val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
+        binding.sliderHistoryExpiry.value = expiryDays.toFloat().coerceIn(5f, 90f)
+        binding.tvHistoryExpiryLabel.text = "Narration memory: $expiryDays days"
+        binding.sliderHistoryExpiry.addOnChangeListener { _, value, _ ->
+            binding.tvHistoryExpiryLabel.text = "Narration memory: ${value.toInt()} days"
+        }
+
         binding.btnClearHistory.setOnClickListener {
             MaterialAlertDialogBuilder(requireContext())
                 .setTitle("Clear History?")
                 .setMessage(
-                    "This removes all places from your \"Places Covered\" list. " +
-                    "They will be eligible to be narrated again on your next tour."
+                    "This removes all places from your \"Places Covered\" list and clears " +
+                    "narration memory so Claude won't repeat context from previous tours. " +
+                    "Everything will be eligible to be narrated again on your next tour."
                 )
                 .setPositiveButton("Clear") { _, _ ->
                     viewModel.clearHistory()
@@ -457,6 +466,8 @@ class SettingsFragment : Fragment() {
         val systemPrompt = binding.etSystemPrompt.text?.toString() ?: ""
         val userPrompt = binding.etUserPrompt.text?.toString() ?: ""
 
+        val expiryDays = binding.sliderHistoryExpiry.value.toInt()
+
         prefs.edit()
             .putString(MainFragment.PREF_API_KEY, anthropicKey)
             .putFloat(MainFragment.PREF_SPEECH_RATE, rate)
@@ -466,6 +477,7 @@ class SettingsFragment : Fragment() {
             .putInt(MainFragment.PREF_KOKORO_VOICE_SID, kokoroVoiceSid)
             .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
             .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
+            .putInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, expiryDays)
             .apply()
     }
 
