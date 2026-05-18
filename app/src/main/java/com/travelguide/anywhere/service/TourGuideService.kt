@@ -312,18 +312,38 @@ class TourGuideService : LifecycleService() {
         }
         currentNarrationPoi = null
         currentNarrationCommit = null
-        emitCurrentTopic("")
-        emitCurrentPoiImage(null)
+
+        // Capture prefetch before cancelling jobs so we can use it immediately.
+        val prefetched = prefetchedNarration.also { prefetchedNarration = null }
+        val nextCommit = prefetchedNarrationCommit.also { prefetchedNarrationCommit = null }
+
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
-        prefetchedNarration = null
-        prefetchedNarrationCommit = null
         ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
-        lastLocation?.let { startGenerationCycle(it) }
+        emitCurrentTopic("")
+        emitCurrentPoiImage(null)
+
+        val nextPoi = prefetched?.first
+        val nextNarration = prefetched?.second
+        if (nextPoi != null && nextNarration != null &&
+            !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
+            mentionedPlacesStore.sessionNames.add(nextPoi.name)
+            currentNarrationCommit = nextCommit
+            currentNarrationPoi = nextPoi
+            emitCurrentPois(listOf(nextPoi))
+            imageFetchJob = lifecycleScope.launch {
+                emitCurrentPoiImage(
+                    try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
+                )
+            }
+            speak(nextNarration, nextPoi.name)
+        } else {
+            lastLocation?.let { startGenerationCycle(it) }
+        }
     }
 
     private fun stopTour() {
@@ -353,12 +373,6 @@ class TourGuideService : LifecycleService() {
                 val key = sharedPrefs.getString(PREF_OPENAI_TTS_KEY, "") ?: ""
                 val model = sharedPrefs.getString(PREF_OPENAI_TTS_MODEL, "tts-1-hd") ?: "tts-1-hd"
                 OpenAiTtsEngine(this, lifecycleScope, key, model)
-            }
-            "elevenlabs" -> {
-                val key = sharedPrefs.getString(PREF_ELEVENLABS_KEY, "") ?: ""
-                val voiceId = sharedPrefs.getString(PREF_ELEVENLABS_VOICE, ElevenLabsTtsEngine.DEFAULT_VOICE_ID)
-                    ?: ElevenLabsTtsEngine.DEFAULT_VOICE_ID
-                ElevenLabsTtsEngine(this, lifecycleScope, key, voiceId)
             }
             "kokoro" -> {
                 if (kokoroModelManager.isReady) {
@@ -428,8 +442,6 @@ class TourGuideService : LifecycleService() {
         const val PREF_TTS_PROVIDER = "pref_tts_provider"
         const val PREF_OPENAI_TTS_KEY = "pref_openai_tts_key"
         const val PREF_OPENAI_TTS_MODEL = "pref_openai_tts_model"
-        const val PREF_ELEVENLABS_KEY = "pref_elevenlabs_key"
-        const val PREF_ELEVENLABS_VOICE = "pref_elevenlabs_voice"
         const val ACTION_SET_SPEED = "ACTION_SET_SPEED"
         const val EXTRA_SPEECH_RATE = "EXTRA_SPEECH_RATE"
         const val PREF_LAST_RADIUS = "pref_last_radius"
