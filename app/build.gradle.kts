@@ -22,8 +22,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 85
-        versionName = "2.4.1"
+        versionCode = 86
+        versionName = "2.4.2"
 
         buildConfigField(
             "String",
