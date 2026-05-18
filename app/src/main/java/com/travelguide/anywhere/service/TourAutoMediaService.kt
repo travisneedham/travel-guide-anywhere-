@@ -1,6 +1,8 @@
 package com.travelguide.anywhere.service
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
@@ -8,17 +10,22 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import com.travelguide.anywhere.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class TourAutoMediaService : MediaBrowserServiceCompat() {
 
     private lateinit var session: MediaSessionCompat
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var currentArtwork: Bitmap? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -33,10 +40,26 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
         pushPlaybackState(TourGuideService.tourState.value)
 
         scope.launch {
-            launch { TourGuideService.tourState.collect { pushPlaybackState(it) } }
             launch {
-                TourGuideService.currentTopic.collect {
-                    pushMetadata(it, TourGuideService.tourState.value)
+                TourGuideService.tourState.collect { state ->
+                    pushPlaybackState(state)
+                    pushMetadata(TourGuideService.currentTopic.value, state)
+                }
+            }
+            launch {
+                TourGuideService.currentTopic.collect { topic ->
+                    pushMetadata(topic, TourGuideService.tourState.value)
+                }
+            }
+            launch {
+                TourGuideService.currentPoiImage.collect { url ->
+                    if (url != null) {
+                        val bitmap = loadBitmap(url)
+                        if (bitmap != null) {
+                            currentArtwork = bitmap
+                            pushMetadata(TourGuideService.currentTopic.value, TourGuideService.tourState.value)
+                        }
+                    }
                 }
             }
         }
@@ -115,14 +138,27 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
             TourState.NO_NEW_POIS   -> "Looking for new places…"
             TourState.ERROR         -> "Error — will retry"
         }
-        session.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, getString(R.string.app_name))
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1L)
+        val builder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, getString(R.string.app_name))
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1L)
+        currentArtwork?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it) }
+        session.setMetadata(builder.build())
+    }
+
+    private suspend fun loadBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(this@TourAutoMediaService)
+                .data(url)
+                .size(800, 800)
+                .allowHardware(false)
                 .build()
-        )
+            val result = imageLoader.execute(request)
+            ((result as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private inner class SessionCallback : MediaSessionCompat.Callback() {
