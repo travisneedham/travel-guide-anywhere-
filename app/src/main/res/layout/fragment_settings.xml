@@ -390,6 +390,132 @@
                 android:background="@color/stroke" />
 
             <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- INTERESTS section (collapsed by default)                -->
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <LinearLayout
+                android:id="@+id/header_interests"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="INTERESTS"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.1" />
+
+                <TextView
+                    android:id="@+id/ind_interests"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▶"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/body_interests"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Choose what types of places to include."
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginBottom="8dp" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_historic"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Historic Sites"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_museum"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Museums"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_attraction"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Attractions"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_artwork"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Art &amp; Galleries"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_viewpoint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Viewpoints"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_park"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Parks &amp; Nature"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_place_of_worship"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Places of Worship"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Tip: uncheck Attractions to filter out commercial venues."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="8dp" />
+
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/stroke" />
+
+            <!-- ═══════════════════════════════════════════════════════ -->
             <!-- NARRATION PROMPTS section (collapsed by default)        -->
             <!-- ═══════════════════════════════════════════════════════ -->
             <LinearLayout

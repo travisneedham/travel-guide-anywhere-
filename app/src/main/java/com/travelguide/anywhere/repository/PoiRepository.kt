@@ -1,5 +1,6 @@
 package com.travelguide.anywhere.repository
 
+import android.content.SharedPreferences
 import android.location.Location
 import android.util.Log
 import com.google.gson.Gson
@@ -18,10 +19,20 @@ import javax.inject.Singleton
 @Singleton
 class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val gson: Gson
+    private val gson: Gson,
+    private val prefs: SharedPreferences
 ) {
     companion object {
         private const val TAG = "PoiRepository"
+
+        // Interest filter prefs — all true by default (all types shown).
+        const val PREF_FILTER_HISTORIC         = "filter_historic"
+        const val PREF_FILTER_MUSEUM           = "filter_museum"
+        const val PREF_FILTER_ATTRACTION       = "filter_attraction"
+        const val PREF_FILTER_ARTWORK          = "filter_artwork"
+        const val PREF_FILTER_VIEWPOINT        = "filter_viewpoint"
+        const val PREF_FILTER_PARK             = "filter_park"
+        const val PREF_FILTER_PLACE_OF_WORSHIP = "filter_place_of_worship"
 
         // OSM place= values that represent administrative/populated-place nodes.
         // These often carry wikipedia/wikidata tags but are not tour-worthy attractions.
@@ -83,6 +94,7 @@ class PoiRepository @Inject constructor(
                 element.tags["place"]?.let { it !in ADMIN_PLACE_TYPES } ?: true
             }
             .map { element -> element.toPlaceOfInterest(location) }
+            .filter { poi -> isTypeEnabled(poi.type) }
             .distinctBy { it.name }
             .let { list ->
                 if (famousMode) list.sortedByDescending { it.fameScore }
@@ -96,6 +108,17 @@ class PoiRepository @Inject constructor(
         }
 
         pois
+    }
+
+    private fun isTypeEnabled(type: PoiType): Boolean = when (type) {
+        PoiType.HISTORIC         -> prefs.getBoolean(PREF_FILTER_HISTORIC, true)
+        PoiType.MUSEUM           -> prefs.getBoolean(PREF_FILTER_MUSEUM, true)
+        PoiType.ATTRACTION       -> prefs.getBoolean(PREF_FILTER_ATTRACTION, true)
+        PoiType.ARTWORK          -> prefs.getBoolean(PREF_FILTER_ARTWORK, true)
+        PoiType.VIEWPOINT        -> prefs.getBoolean(PREF_FILTER_VIEWPOINT, true)
+        PoiType.PARK             -> prefs.getBoolean(PREF_FILTER_PARK, true)
+        PoiType.PLACE_OF_WORSHIP -> prefs.getBoolean(PREF_FILTER_PLACE_OF_WORSHIP, true)
+        PoiType.OTHER            -> true
     }
 
     // Nearby mode: all interesting POI types sorted by distance (closest first).

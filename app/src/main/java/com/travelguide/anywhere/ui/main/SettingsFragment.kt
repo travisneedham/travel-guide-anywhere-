@@ -32,6 +32,7 @@ import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.databinding.FragmentSettingsBinding
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.repository.NarrationRepository
+import com.travelguide.anywhere.repository.PoiRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.PiperModelManager
@@ -98,6 +99,7 @@ class SettingsFragment : Fragment() {
         setupCollapsibleSections()
         loadApiKey()
         loadVoiceSettings()
+        loadInterestFilters()
         loadPrompts()
         setupDiagnostics()
         setupExperiment()
@@ -117,6 +119,7 @@ class SettingsFragment : Fragment() {
         }
         binding.headerApi.setOnClickListener { toggle(binding.bodyApi, binding.indApi) }
         binding.headerVoice.setOnClickListener { toggle(binding.bodyVoice, binding.indVoice) }
+        binding.headerInterests.setOnClickListener { toggle(binding.bodyInterests, binding.indInterests) }
         binding.headerPrompts.setOnClickListener { toggle(binding.bodyPrompts, binding.indPrompts) }
         binding.headerDiag.setOnClickListener { toggle(binding.bodyDiag, binding.indDiag) }
     }
@@ -382,6 +385,16 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun loadInterestFilters() {
+        binding.cbFilterHistoric.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_HISTORIC, true)
+        binding.cbFilterMuseum.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_MUSEUM, true)
+        binding.cbFilterAttraction.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ATTRACTION, true)
+        binding.cbFilterArtwork.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ARTWORK, true)
+        binding.cbFilterViewpoint.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_VIEWPOINT, true)
+        binding.cbFilterPark.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PARK, true)
+        binding.cbFilterPlaceOfWorship.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, true)
+    }
+
     private fun loadPrompts() {
         binding.etSystemPrompt.setText(
             prefs.getString(NarrationRepository.PREF_SYSTEM_PROMPT, "")
@@ -631,6 +644,13 @@ class SettingsFragment : Fragment() {
             .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
             .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
             .putInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, expiryDays)
+            .putBoolean(PoiRepository.PREF_FILTER_HISTORIC, binding.cbFilterHistoric.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_MUSEUM, binding.cbFilterMuseum.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_ATTRACTION, binding.cbFilterAttraction.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_ARTWORK, binding.cbFilterArtwork.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_VIEWPOINT, binding.cbFilterViewpoint.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_PARK, binding.cbFilterPark.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, binding.cbFilterPlaceOfWorship.isChecked)
             .apply()
     }
 
