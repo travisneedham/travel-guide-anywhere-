@@ -3,12 +3,19 @@ package com.travelguide.anywhere.repository
 import android.content.SharedPreferences
 import android.location.Location
 import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.data.remote.dto.ClaudeMessage
 import com.travelguide.anywhere.data.remote.dto.ClaudeRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,6 +24,8 @@ class NarrationRepository @Inject constructor(
     private val claudeApi: ClaudeApiService,
     private val prefs: SharedPreferences,
     private val historyStore: NarrationHistoryStore,
+    private val okHttpClient: OkHttpClient,
+    private val gson: Gson,
 ) {
 
     data class NarrationResult(
@@ -42,13 +51,25 @@ class NarrationRepository @Inject constructor(
 
         val locationStr = "%.4f°N, %.4f°W".format(location.latitude, Math.abs(location.longitude))
 
+        // Fetch Wikipedia intro for enrichment — never blocks narration if it fails.
+        val wikiExtract = poi.tags["wikipedia"]?.let { fetchWikipediaIntro(it) }
+        if (wikiExtract != null) {
+            Log.d(TAG, "Wikipedia context for '${poi.name}': ${wikiExtract.length} chars")
+        }
+
         val systemPrompt = prefs.getString(PREF_SYSTEM_PROMPT, "")
             ?.takeIf { it.isNotBlank() } ?: ClaudeApiService.SYSTEM_PROMPT
 
-        val userMessageText = (prefs.getString(PREF_USER_PROMPT, "")?.takeIf { it.isNotBlank() }
+        val baseUserMessage = (prefs.getString(PREF_USER_PROMPT, "")?.takeIf { it.isNotBlank() }
             ?: DEFAULT_USER_PROMPT)
             .replace("{location}", locationStr)
             .replace("{poi}", poiLine)
+
+        val userMessageText = if (wikiExtract != null) {
+            "$baseUserMessage\n\n---\nBackground context from Wikipedia:\n\n$wikiExtract"
+        } else {
+            baseUserMessage
+        }
 
         val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
         val history = historyStore.getMessages(
@@ -58,14 +79,16 @@ class NarrationRepository @Inject constructor(
             expiryDays = expiryDays,
         )
 
+        val maxTokens = maxTokensFor(poi, wikiExtract != null)
         val messages = history + listOf(ClaudeMessage(role = "user", content = userMessageText))
 
         val request = ClaudeRequest(
             system = systemPrompt,
             messages = messages,
+            maxTokens = maxTokens,
         )
 
-        Log.d(TAG, "Claude request: ${history.size / 2} history pairs + current message")
+        Log.d(TAG, "Claude request: ${history.size / 2} history pairs, maxTokens=$maxTokens, wiki=${wikiExtract != null}")
 
         // Retry up to 3 times on transient errors.
         repeat(3) { attempt ->
@@ -97,6 +120,62 @@ class NarrationRepository @Inject constructor(
         return NarrationResult(text = "Unable to generate narration at this time.", commitHistory = {})
     }
 
+    // Fetch the intro section of a Wikipedia article. Returns null on any failure.
+    // The Wikipedia tag in OSM is formatted as "en:Article Title".
+    private suspend fun fetchWikipediaIntro(wikipediaTag: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val colon = wikipediaTag.indexOf(':')
+            if (colon < 0) return@withContext null
+            val lang = wikipediaTag.substring(0, colon)
+            val title = wikipediaTag.substring(colon + 1)
+
+            val url = "https://$lang.wikipedia.org/w/api.php?" +
+                "action=query&prop=extracts&exintro=true&explaintext=true" +
+                "&titles=${URLEncoder.encode(title, "UTF-8")}&format=json"
+
+            val httpRequest = Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+                .build()
+
+            val responseBody = okHttpClient.newCall(httpRequest).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                response.body?.string() ?: return@withContext null
+            }
+
+            val json = gson.fromJson(responseBody, JsonObject::class.java)
+            val pages = json.getAsJsonObject("query")?.getAsJsonObject("pages")
+                ?: return@withContext null
+            val page = pages.entrySet().firstOrNull()?.value?.asJsonObject
+                ?: return@withContext null
+
+            if (page.get("pageid")?.asInt == -1) return@withContext null
+
+            val extract = page.get("extract")?.asString?.trim() ?: return@withContext null
+            if (extract.isBlank()) return@withContext null
+
+            // Cap at 6000 chars — Wikipedia intro sections are typically 500–3000 chars;
+            // this prevents extreme cases from ballooning token cost.
+            extract.take(6000)
+        } catch (e: Exception) {
+            Log.w(TAG, "Wikipedia fetch failed for '$wikipediaTag': ${e.message}")
+            null
+        }
+    }
+
+    private fun maxTokensFor(poi: PlaceOfInterest, hasWikiContext: Boolean): Int {
+        val score = poi.fameScore
+        return when {
+            hasWikiContext && score >= 2000 -> 4000  // World-famous + rich context
+            hasWikiContext && score >= 500  -> 2500  // Notable with good Wikipedia context
+            hasWikiContext                  -> 1500  // Has Wikipedia but lower fame
+            score >= 1000                   -> 2000  // Very famous, no Wikipedia tag
+            score >= 200                    -> 1200  // Moderately notable
+            else                            -> 800   // Simple/small place
+        }
+    }
+
     companion object {
         private const val TAG = "NarrationRepository"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
@@ -105,7 +184,7 @@ class NarrationRepository @Inject constructor(
             "I'm currently at coordinates {location}. " +
             "The closest interesting place to me that I haven't heard about yet is:\n\n" +
             "{poi}\n\n" +
-            "Please give me an engaging audio narration about this specific place. " +
+            "Please give me an engaging audio narration about this place. " +
             "Start naturally, as if you're right here with me, continuing our tour together."
     }
 }
