@@ -31,6 +31,11 @@ class ElevenLabsTtsEngine(
     private var isPaused = false
     private var currentFile: File? = null
 
+    // Prewarm state — captured and nulled before stop() so stop() doesn't delete them.
+    private var prewarmJob: Job? = null
+    @Volatile private var prewarmText: String? = null
+    @Volatile private var prewarmResult: File? = null
+
     override val canResume: Boolean get() = isPaused && mediaPlayer != null
 
     private val httpClient = OkHttpClient.Builder()
@@ -38,13 +43,44 @@ class ElevenLabsTtsEngine(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    override fun prewarm(text: String, speechRate: Float) {
+        if (prewarmText == text) return  // already in progress or complete for this text
+        prewarmJob?.cancel()
+        prewarmResult?.delete()
+        prewarmResult = null
+        prewarmText = text
+        prewarmJob = scope.launch {
+            try {
+                val audioBytes = fetchAudio(text)
+                val file = File(context.cacheDir, "tts_el_pre_${UUID.randomUUID()}.mp3")
+                file.writeBytes(audioBytes)
+                prewarmResult = file
+                Log.d(TAG, "Prewarm complete (${audioBytes.size / 1024}kb)")
+            } catch (e: Exception) {
+                prewarmText = null  // allow retry
+                Log.w(TAG, "Prewarm failed: ${e.message}")
+            }
+        }
+    }
+
     override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit, onEnqueued: () -> Unit) {
+        // Detach prewarm state before stop() so stop() doesn't clean it up.
+        val savedText = prewarmText.also { prewarmText = null }
+        val savedFile = prewarmResult.also { prewarmResult = null }
+        val savedJob = prewarmJob.also { prewarmJob = null }
         stop()
         speakJob = scope.launch {
             try {
-                val audioBytes = fetchAudio(text)
-                val file = File(context.cacheDir, "tts_el_${UUID.randomUUID()}.mp3")
-                file.writeBytes(audioBytes)
+                val file = if (savedText == text && savedFile?.exists() == true) {
+                    Log.d(TAG, "Using prewarmed audio")
+                    savedJob?.cancel()  // job is done since file exists; cancel is a no-op
+                    savedFile
+                } else {
+                    savedJob?.cancel()
+                    savedFile?.delete()
+                    val audioBytes = fetchAudio(text)
+                    File(context.cacheDir, "tts_el_${UUID.randomUUID()}.mp3").also { it.writeBytes(audioBytes) }
+                }
                 currentFile = file
                 withContext(Dispatchers.Main) {
                     mediaPlayer = MediaPlayer().apply {
@@ -97,6 +133,11 @@ class ElevenLabsTtsEngine(
     override fun stop() {
         speakJob?.cancel()
         speakJob = null
+        prewarmJob?.cancel()
+        prewarmJob = null
+        prewarmResult?.delete()
+        prewarmResult = null
+        prewarmText = null
         isPaused = false
         try { mediaPlayer?.stop() } catch (_: Exception) {}
         mediaPlayer?.release()
