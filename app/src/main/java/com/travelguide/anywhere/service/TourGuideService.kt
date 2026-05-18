@@ -190,7 +190,7 @@ class TourGuideService : LifecycleService() {
                 prefetchedNarrationCommit = result.commitHistory
                 Log.d(TAG, "Prefetched next narration: ${poi.name} — starting audio pre-generation")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
-                ttsEngine?.prewarm(narration, speechRate)
+                ttsEngine?.prewarm(result.text, speechRate)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
