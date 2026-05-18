@@ -19,12 +19,18 @@ class NarrationRepository @Inject constructor(
     private val historyStore: NarrationHistoryStore,
 ) {
 
+    data class NarrationResult(
+        val text: String,
+        /** Call this alongside mentionedPlacesStore.commit() — never before. */
+        val commitHistory: () -> Unit,
+    )
+
     suspend fun generateNarration(
         pois: List<PlaceOfInterest>,
         location: Location,
         radiusMiles: Float,
         apiKey: String,
-    ): String {
+    ): NarrationResult {
         val poi = pois.first()
         val distStr = "%.2f".format(poi.distanceMiles)
         val extraTags = poi.tags
@@ -67,17 +73,18 @@ class NarrationRepository @Inject constructor(
                 val response = claudeApi.createMessage(apiKey = apiKey, request = request)
                 val text = response.text
                 if (text.isNotBlank()) {
-                    historyStore.append(
-                        userMessage = userMessageText,
-                        assistantMessage = text,
-                        lat = location.latitude,
-                        lon = location.longitude,
-                    )
-                    return text
+                    return NarrationResult(text = text, commitHistory = {
+                        historyStore.append(
+                            userMessage = userMessageText,
+                            assistantMessage = text,
+                            lat = location.latitude,
+                            lon = location.longitude,
+                        )
+                    })
                 }
                 val errMsg = response.error?.message ?: ""
                 if (errMsg.isNotBlank() && !errMsg.contains("timeout", ignoreCase = true)) {
-                    return errMsg
+                    return NarrationResult(text = errMsg, commitHistory = {})
                 }
                 Log.w(TAG, "Attempt ${attempt + 1}: blank/timeout response — $errMsg")
             } catch (e: Exception) {
@@ -87,7 +94,7 @@ class NarrationRepository @Inject constructor(
             delay(3_000L * (attempt + 1))
         }
 
-        return "Unable to generate narration at this time."
+        return NarrationResult(text = "Unable to generate narration at this time.", commitHistory = {})
     }
 
     companion object {

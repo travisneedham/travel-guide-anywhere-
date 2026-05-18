@@ -58,8 +58,10 @@ class TourGuideService : LifecycleService() {
     private var savedTopicName = ""
 
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
+    @Volatile private var currentNarrationCommit: (() -> Unit)? = null
     @Volatile private var speakStartTime: Long = 0L
     @Volatile private var prefetchedNarration: Pair<PlaceOfInterest, String>? = null
+    @Volatile private var prefetchedNarrationCommit: (() -> Unit)? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -155,13 +157,10 @@ class TourGuideService : LifecycleService() {
                     )
                 }
 
-                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
-                // Commit to disk immediately after generation so a stop during LOADING_AUDIO
-                // doesn't leave narrationHistoryStore ahead of mentionedPlacesStore.
-                mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
-                mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                currentNarrationCommit = result.commitHistory
                 isGenerating = false
-                speak(narration, poi.name)
+                speak(result.text, poi.name)
 
             } catch (e: CancellationException) {
                 isGenerating = false
@@ -186,10 +185,9 @@ class TourGuideService : LifecycleService() {
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
                 if (pois.isEmpty()) return@launch
                 val poi = pois.first()
-                val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
-                // Same atomicity guarantee as the main cycle: persist before audio loads.
-                mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
-                prefetchedNarration = poi to narration
+                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                prefetchedNarration = poi to result.text
+                prefetchedNarrationCommit = result.commitHistory
                 Log.d(TAG, "Prefetched next narration: ${poi.name} — starting audio pre-generation")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
                 ttsEngine?.prewarm(narration, speechRate)
@@ -231,16 +229,19 @@ class TourGuideService : LifecycleService() {
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
                 val poi = currentNarrationPoi
+                val commit = currentNarrationCommit.also { currentNarrationCommit = null }
                 currentNarrationPoi = null
                 isSpeaking = false
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     if (poi != null && duration >= 10_000L) {
                         mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+                        commit?.invoke()
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
 
                     val prefetched = prefetchedNarration.also { prefetchedNarration = null }
+                    val nextCommit = prefetchedNarrationCommit.also { prefetchedNarrationCommit = null }
                     prefetchJob?.cancel(); prefetchJob = null
 
                     val nextPoi = prefetched?.first
@@ -248,6 +249,7 @@ class TourGuideService : LifecycleService() {
                     if (nextPoi != null && nextNarration != null &&
                         !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
+                        currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
                         emitCurrentPois(listOf(nextPoi))
                         // Fetch image for prefetched POI.
@@ -266,11 +268,13 @@ class TourGuideService : LifecycleService() {
             },
             onError = {
                 currentNarrationPoi = null
+                currentNarrationCommit = null
                 isSpeaking = false
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     prefetchJob?.cancel(); prefetchJob = null
                     prefetchedNarration = null
+                    prefetchedNarrationCommit = null
                     lastLocation?.let { onLocationUpdate(it) }
                 }
             }
@@ -300,17 +304,21 @@ class TourGuideService : LifecycleService() {
 
     private fun skipCurrent() {
         val poi = currentNarrationPoi
+        val commit = currentNarrationCommit
         if (poi != null) {
             mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+            commit?.invoke()
             mentionedPlaces.value = mentionedPlacesStore.recentFive()
         }
         currentNarrationPoi = null
+        currentNarrationCommit = null
         emitCurrentTopic("")
         emitCurrentPoiImage(null)
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
         prefetchedNarration = null
+        prefetchedNarrationCommit = null
         ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
@@ -320,10 +328,12 @@ class TourGuideService : LifecycleService() {
 
     private fun stopTour() {
         currentNarrationPoi = null
+        currentNarrationCommit = null
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
         prefetchedNarration = null
+        prefetchedNarrationCommit = null
         fusedLocation.removeLocationUpdates(locationCallback)
         ttsEngine?.stop()
         isSpeaking = false
