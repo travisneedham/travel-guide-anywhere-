@@ -34,11 +34,16 @@ import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
+import com.travelguide.anywhere.service.PiperModelManager
+import com.travelguide.anywhere.service.PiperTtsEngine
+import com.travelguide.anywhere.service.PiperVoice
+import com.travelguide.anywhere.service.PiperVoices
 import com.travelguide.anywhere.service.TourGuideService
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.travelguide.anywhere.experiment.TtsExperiment
 import com.travelguide.anywhere.service.KokoroTtsEngine
 import com.travelguide.anywhere.service.TourState
@@ -59,6 +64,7 @@ class SettingsFragment : Fragment() {
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
+    @Inject lateinit var piperModelManager: PiperModelManager
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -71,6 +77,13 @@ class SettingsFragment : Fragment() {
     private var previewPlayer: android.media.MediaPlayer? = null
     private var lastPreviewSid: Int = -1
     private var lastPreviewName: String = ""
+
+    // Piper preview state
+    private var piperPreviewTts: OfflineTts? = null
+    private var piperPreviewTtsVoiceId: String? = null  // which voice piperPreviewTts is loaded for
+    private var lastPiperPreviewVoice: PiperVoice? = null
+    private var pendingPiperPreview: String? = null  // play preview once download for this voice finishes
+    private var piperStateJob: Job? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -120,6 +133,7 @@ class SettingsFragment : Fragment() {
         when (prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android")) {
             "openai" -> binding.rbOpenai.isChecked = true
             "kokoro" -> binding.rbKokoro.isChecked = true
+            "piper" -> binding.rbPiper.isChecked = true
             else -> binding.rbAndroid.isChecked = true
         }
         applyProviderVisibility()
@@ -169,11 +183,149 @@ class SettingsFragment : Fragment() {
             KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
         )
         setupKokoroDownload()
+        setupPiperPicker()
+    }
+
+    private fun setupPiperPicker() {
+        val labels = PiperVoices.ALL.map { "${it.displayName}  (~${it.sizeMb} MB)" }
+        binding.actvPiperVoice.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, labels)
+        )
+        val savedId = prefs.getString(TourGuideService.PREF_PIPER_VOICE_ID, PiperVoices.DEFAULT_VOICE_ID)
+            ?: PiperVoices.DEFAULT_VOICE_ID
+        val savedVoice = PiperVoices.byId(savedId) ?: PiperVoices.ALL.first()
+        val savedIndex = PiperVoices.ALL.indexOf(savedVoice).coerceAtLeast(0)
+        binding.actvPiperVoice.setText(labels[savedIndex], false)
+        lastPiperPreviewVoice = savedVoice
+        observePiperVoiceState(savedVoice)
+
+        binding.actvPiperVoice.setOnItemClickListener { _, _, position, _ ->
+            val voice = PiperVoices.ALL.getOrNull(position) ?: return@setOnItemClickListener
+            prefs.edit().putString(TourGuideService.PREF_PIPER_VOICE_ID, voice.id).apply()
+            lastPiperPreviewVoice = voice
+            observePiperVoiceState(voice)
+            if (piperModelManager.isVoiceReady(voice.id)) {
+                previewPiperVoice(voice)
+            } else {
+                // Trigger silent download — preview will auto-play when ready.
+                pendingPiperPreview = voice.id
+                piperModelManager.downloadVoiceIfNeeded(voice)
+            }
+        }
+
+        // Replay last Piper preview when user moves the speed slider.
+        binding.sliderSpeechRate.addOnChangeListener { _, _, fromUser ->
+            if (!fromUser) return@addOnChangeListener
+            val v = lastPiperPreviewVoice
+            if (binding.rbPiper.isChecked && v != null && piperModelManager.isVoiceReady(v.id)) {
+                previewPiperVoice(v)
+            }
+        }
+    }
+
+    private fun observePiperVoiceState(voice: PiperVoice) {
+        piperStateJob?.cancel()
+        piperStateJob = viewLifecycleOwner.lifecycleScope.launch {
+            piperModelManager.stateFor(voice.id).collect { state ->
+                applyPiperState(voice, state)
+            }
+        }
+    }
+
+    private fun applyPiperState(voice: PiperVoice, state: PiperModelManager.VoiceState) {
+        when (state) {
+            is PiperModelManager.VoiceState.NotDownloaded -> {
+                binding.tvPiperStatus.text = "Not downloaded — tap a voice to install it"
+                binding.progressPiper.visibility = View.GONE
+            }
+            is PiperModelManager.VoiceState.Downloading -> {
+                val pct = (state.progress * 100).toInt()
+                binding.tvPiperStatus.text = "Downloading ${voice.displayName}… $pct%"
+                binding.progressPiper.visibility = View.VISIBLE
+                binding.progressPiper.isIndeterminate = false
+                binding.progressPiper.progress = pct
+            }
+            is PiperModelManager.VoiceState.Extracting -> {
+                binding.tvPiperStatus.text = "Extracting ${voice.displayName}…"
+                binding.progressPiper.visibility = View.VISIBLE
+                binding.progressPiper.isIndeterminate = true
+            }
+            is PiperModelManager.VoiceState.Ready -> {
+                binding.tvPiperStatus.text = "Ready"
+                binding.progressPiper.visibility = View.GONE
+                if (pendingPiperPreview == voice.id) {
+                    pendingPiperPreview = null
+                    previewPiperVoice(voice)
+                }
+            }
+            is PiperModelManager.VoiceState.Error -> {
+                binding.tvPiperStatus.text = "Error: ${state.message}"
+                binding.progressPiper.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun previewPiperVoice(voice: PiperVoice) {
+        if (!piperModelManager.isVoiceReady(voice.id)) return
+        val speed = binding.sliderSpeechRate.value
+        previewJob?.cancel()
+        previewPlayer?.runCatching { stop() }
+        previewPlayer?.release()
+        previewPlayer = null
+
+        previewJob = viewLifecycleOwner.lifecycleScope.launch {
+            val cached = piperModelManager.voicePreviewFile(voice.id)
+            val wav: File = if (cached.exists()) {
+                cached
+            } else {
+                val voiceDir = piperModelManager.voiceDir(voice.id)
+                if (piperPreviewTts == null || piperPreviewTtsVoiceId != voice.id) {
+                    piperPreviewTts = withContext(Dispatchers.IO) {
+                        OfflineTts(config = OfflineTtsConfig(
+                            model = OfflineTtsModelConfig(
+                                vits = OfflineTtsVitsModelConfig(
+                                    model = File(voiceDir, "${voice.id}.onnx").absolutePath,
+                                    tokens = File(voiceDir, "tokens.txt").absolutePath,
+                                    dataDir = File(voiceDir, "espeak-ng-data").absolutePath,
+                                ),
+                                numThreads = 1,
+                                debug = false,
+                                provider = "cpu",
+                            )
+                        ))
+                    }
+                    piperPreviewTtsVoiceId = voice.id
+                }
+                val tts = piperPreviewTts ?: return@launch
+                val speakerName = voice.displayName.substringBefore(" ")
+                withContext(Dispatchers.IO) {
+                    tts.generate(
+                        text = PiperTtsEngine.VOICE_PREVIEW_TEMPLATE.format(speakerName),
+                        sid = 0,
+                        speed = 0.95f,
+                    ).save(cached.absolutePath)
+                }
+                if (!isActive) { cached.delete(); return@launch }
+                cached
+            }
+
+            val mp = android.media.MediaPlayer().apply {
+                setDataSource(wav.absolutePath)
+                prepare()
+                setOnCompletionListener { previewPlayer = null }
+            }
+            previewPlayer = mp
+            mp.start()
+            try {
+                mp.playbackParams = android.media.PlaybackParams().setSpeed(speed)
+            } catch (_: Exception) { /* falls back to 1.0× */ }
+        }
     }
 
     private fun applyProviderVisibility() {
         binding.sectionOpenai.visibility = if (binding.rbOpenai.isChecked) View.VISIBLE else View.GONE
         binding.sectionKokoro.visibility = if (binding.rbKokoro.isChecked) View.VISIBLE else View.GONE
+        binding.sectionPiper.visibility = if (binding.rbPiper.isChecked) View.VISIBLE else View.GONE
     }
 
     private fun setupKokoroDownload() {
@@ -456,6 +608,7 @@ class SettingsFragment : Fragment() {
         val provider = when (binding.rgTtsProvider.checkedRadioButtonId) {
             R.id.rb_openai -> "openai"
             R.id.rb_kokoro -> "kokoro"
+            R.id.rb_piper -> "piper"
             else -> "android"
         }
         val openAiKey = binding.etOpenaiKey.text?.toString()?.trim() ?: ""
@@ -585,6 +738,9 @@ class SettingsFragment : Fragment() {
         previewPlayer?.runCatching { stop() }
         previewPlayer?.release()
         previewPlayer = null
+        piperStateJob?.cancel()
+        piperPreviewTts = null
+        piperPreviewTtsVoiceId = null
         super.onDestroyView()
         _binding = null
     }

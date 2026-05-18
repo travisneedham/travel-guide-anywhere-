@@ -43,6 +43,7 @@ class TourGuideService : LifecycleService() {
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
     @Inject lateinit var narrationHistoryStore: NarrationHistoryStore
     @Inject lateinit var kokoroModelManager: KokoroModelManager
+    @Inject lateinit var piperModelManager: PiperModelManager
     @Inject lateinit var poiImageRepository: PoiImageRepository
 
     private var ttsEngine: TtsEngine? = null
@@ -385,6 +386,16 @@ class TourGuideService : LifecycleService() {
                     AndroidTtsEngine(this)
                 }
             }
+            "piper" -> {
+                val voiceId = sharedPrefs.getString(PREF_PIPER_VOICE_ID, PiperVoices.DEFAULT_VOICE_ID)
+                    ?: PiperVoices.DEFAULT_VOICE_ID
+                if (piperModelManager.isVoiceReady(voiceId)) {
+                    PiperTtsEngine(this, piperModelManager.voiceDir(voiceId), voiceId)
+                } else {
+                    Log.w(TAG, "Piper voice $voiceId not downloaded — falling back to Android TTS")
+                    AndroidTtsEngine(this)
+                }
+            }
             else -> AndroidTtsEngine(this)
         }
     }
@@ -442,6 +453,7 @@ class TourGuideService : LifecycleService() {
         const val PREF_TTS_PROVIDER = "pref_tts_provider"
         const val PREF_OPENAI_TTS_KEY = "pref_openai_tts_key"
         const val PREF_OPENAI_TTS_MODEL = "pref_openai_tts_model"
+        const val PREF_PIPER_VOICE_ID = "pref_piper_voice_id"
         const val ACTION_SET_SPEED = "ACTION_SET_SPEED"
         const val EXTRA_SPEECH_RATE = "EXTRA_SPEECH_RATE"
         const val PREF_LAST_RADIUS = "pref_last_radius"

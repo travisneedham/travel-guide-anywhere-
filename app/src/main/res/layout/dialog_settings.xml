@@ -171,6 +171,14 @@
                     android:text="Kokoro (free, offline, high quality, long load times between entries)"
                     android:textColor="@color/text_primary"
                     android:buttonTint="@color/accent" />
+
+                <RadioButton
+                    android:id="@+id/rb_piper"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Piper (free, offline, medium quality, fast)"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent" />
             </RadioGroup>
 
             <!-- OpenAI sub-section (shown when OpenAI selected) -->
@@ -305,6 +313,49 @@
                         android:inputType="none"
                         android:focusable="false" />
                 </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- Piper sub-section -->
+            <LinearLayout
+                android:id="@+id/section_piper"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_piper_voice"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:hint="Voice">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/actv_piper_voice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none"
+                        android:focusable="false" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <TextView
+                    android:id="@+id/tv_piper_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="@color/accent"
+                    android:layout_marginBottom="4dp" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_piper"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:indeterminate="false"
+                    android:visibility="gone"
+                    app:indicatorColor="@color/accent"
+                    app:trackColor="@color/stroke" />
             </LinearLayout>
         </LinearLayout>
 
