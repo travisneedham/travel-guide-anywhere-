@@ -156,6 +156,10 @@ class TourGuideService : LifecycleService() {
                 }
 
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                // Commit to disk immediately after generation so a stop during LOADING_AUDIO
+                // doesn't leave narrationHistoryStore ahead of mentionedPlacesStore.
+                mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+                mentionedPlaces.value = mentionedPlacesStore.recentFive()
                 isGenerating = false
                 speak(narration, poi.name)
 
@@ -183,6 +187,8 @@ class TourGuideService : LifecycleService() {
                 if (pois.isEmpty()) return@launch
                 val poi = pois.first()
                 val narration = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                // Same atomicity guarantee as the main cycle: persist before audio loads.
+                mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
                 prefetchedNarration = poi to narration
                 Log.d(TAG, "Prefetched next narration: ${poi.name} — starting audio pre-generation")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
