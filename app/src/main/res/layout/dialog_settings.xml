@@ -152,7 +152,7 @@
                     android:id="@+id/rb_android"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Android TTS (free, offline)"
+                    android:text="Android TTS (free, offline, low quality)"
                     android:textColor="@color/text_primary"
                     android:buttonTint="@color/accent" />
 
@@ -160,7 +160,7 @@
                     android:id="@+id/rb_openai"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="OpenAI"
+                    android:text="OpenAI ($.04 per entry, online, high quality)"
                     android:textColor="@color/text_primary"
                     android:buttonTint="@color/accent" />
 
@@ -168,7 +168,7 @@
                     android:id="@+id/rb_kokoro"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Kokoro (free, on-device, high quality)"
+                    android:text="Kokoro (free, offline, high quality, long load times between entries)"
                     android:textColor="@color/text_primary"
                     android:buttonTint="@color/accent" />
             </RadioGroup>
