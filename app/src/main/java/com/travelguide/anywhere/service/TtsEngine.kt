@@ -14,6 +14,9 @@ interface TtsEngine {
         /** Called when the last chunk has been generated and the engine is idle.
          *  Callers can use this moment to start prewarm() for the next narration. */
         onEnqueued: () -> Unit,
+        /** Called with values 0.0–1.0 as audio is prepared. Null means no progress
+         *  reporting is needed (e.g. prewarm path). Not called once onStart fires. */
+        onProgress: ((Float) -> Unit)? = null,
     )
 
     /** Pre-generate the first audio chunk for [text] while the engine is idle.

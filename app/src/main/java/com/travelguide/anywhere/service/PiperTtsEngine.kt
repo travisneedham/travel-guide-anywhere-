@@ -100,6 +100,7 @@ class PiperTtsEngine(
         onDone: () -> Unit,
         onError: () -> Unit,
         onEnqueued: () -> Unit,
+        onProgress: ((Float) -> Unit)?,
     ) {
         // Detach prewarm state BEFORE stop() so stop() doesn't clean it up.
         val savedText = prewarmText.also { prewarmText = null }
@@ -111,11 +112,13 @@ class PiperTtsEngine(
                 val file = if (savedText == text && savedFile?.exists() == true) {
                     Log.d(TAG, "Using prewarmed Piper audio")
                     savedJob?.cancel()
+                    onProgress?.invoke(1.0f)
                     savedFile
                 } else {
                     savedJob?.cancel()
                     savedFile?.delete()
-                    generateWav(text, speechRate, "piper_") ?: throw Exception("audio generation failed")
+                    generateWav(text, speechRate, "piper_", onProgress)
+                        ?: throw Exception("audio generation failed")
                 }
                 withContext(Dispatchers.Main) {
                     mediaPlayer = MediaPlayer().apply {
@@ -150,21 +153,41 @@ class PiperTtsEngine(
         }
     }
 
-    private suspend fun generateWav(text: String, speechRate: Float, prefix: String): File? =
-        withContext(genDispatcher) {
-            val engine = tts ?: return@withContext null
-            val outFile = File(context.cacheDir, "$prefix${UUID.randomUUID()}.wav")
-            try {
-                // Piper VITS uses sid=0 (single-speaker per model).
+    private suspend fun generateWav(
+        text: String,
+        speechRate: Float,
+        prefix: String,
+        onProgress: ((Float) -> Unit)? = null,
+    ): File? = withContext(genDispatcher) {
+        val engine = tts ?: return@withContext null
+        val outFile = File(context.cacheDir, "$prefix${UUID.randomUUID()}.wav")
+        try {
+            if (onProgress != null) {
+                // Piper VITS outputs at 22050 Hz. Estimate total samples from text length:
+                // ~65 ms of audio per character at 1.0× speed → 22050 * 0.065 ≈ 1433 samples/char.
+                val estimatedSamples = (text.length * 1433 / speechRate).toLong().coerceAtLeast(1)
+                var samplesGenerated = 0L
+                engine.generateWithCallback(
+                    text = text,
+                    sid = 0,
+                    speed = speechRate,
+                ) { samples ->
+                    samplesGenerated += samples.size
+                    onProgress((samplesGenerated.toFloat() / estimatedSamples).coerceAtMost(0.95f))
+                    1  // continue
+                }.save(outFile.absolutePath)
+                onProgress(1.0f)
+            } else {
                 engine.generate(text = text, sid = 0, speed = speechRate)
                     .save(outFile.absolutePath)
-                outFile
-            } catch (e: Exception) {
-                Log.e(TAG, "Piper generate error: ${e.message}")
-                outFile.delete()
-                null
             }
+            outFile
+        } catch (e: Exception) {
+            Log.e(TAG, "Piper generate error: ${e.message}")
+            outFile.delete()
+            null
         }
+    }
 
     override fun setSpeed(rate: Float) {
         currentPlayRate = rate

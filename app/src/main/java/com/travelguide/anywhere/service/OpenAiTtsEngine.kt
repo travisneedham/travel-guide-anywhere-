@@ -63,7 +63,7 @@ class OpenAiTtsEngine(
         }
     }
 
-    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit, onEnqueued: () -> Unit) {
+    override fun speak(text: String, speechRate: Float, onStart: () -> Unit, onDone: () -> Unit, onError: () -> Unit, onEnqueued: () -> Unit, onProgress: ((Float) -> Unit)?) {
         // Detach prewarm state before stop() so stop() doesn't clean it up.
         val savedText = prewarmText.also { prewarmText = null }
         val savedFile = prewarmResult.also { prewarmResult = null }
@@ -73,12 +73,13 @@ class OpenAiTtsEngine(
             try {
                 val file = if (savedText == text && savedFile?.exists() == true) {
                     Log.d(TAG, "Using prewarmed audio")
-                    savedJob?.cancel()  // job is done since file exists; cancel is a no-op
+                    savedJob?.cancel()
+                    onProgress?.invoke(1.0f)
                     savedFile
                 } else {
                     savedJob?.cancel()
                     savedFile?.delete()
-                    val audioBytes = fetchAudio(text, speechRate)
+                    val audioBytes = fetchAudio(text, speechRate, onProgress)
                     File(context.cacheDir, "tts_oai_${UUID.randomUUID()}.mp3").also { it.writeBytes(audioBytes) }
                 }
                 currentFile = file
@@ -148,31 +149,55 @@ class OpenAiTtsEngine(
 
     override fun shutdown() = stop()
 
-    private suspend fun fetchAudio(text: String, speechRate: Float): ByteArray =
-        withContext(Dispatchers.IO) {
-            val speed = speechRate.coerceIn(0.25f, 4.0f)
-            val json = JSONObject()
-                .put("model", model)
-                .put("input", text)
-                .put("voice", "onyx")
-                .put("response_format", "mp3")
-                .put("speed", speed.toDouble())
-                .toString()
+    private suspend fun fetchAudio(
+        text: String,
+        speechRate: Float,
+        onProgress: ((Float) -> Unit)? = null,
+    ): ByteArray = withContext(Dispatchers.IO) {
+        val speed = speechRate.coerceIn(0.25f, 4.0f)
+        val json = JSONObject()
+            .put("model", model)
+            .put("input", text)
+            .put("voice", "onyx")
+            .put("response_format", "mp3")
+            .put("speed", speed.toDouble())
+            .toString()
 
-            val request = Request.Builder()
-                .url("https://api.openai.com/v1/audio/speech")
-                .header("Authorization", "Bearer $apiKey")
-                .header("Content-Type", "application/json")
-                .post(json.toRequestBody("application/json".toMediaType()))
-                .build()
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/audio/speech")
+            .header("Authorization", "Bearer $apiKey")
+            .header("Content-Type", "application/json")
+            .post(json.toRequestBody("application/json".toMediaType()))
+            .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw Exception("OpenAI TTS HTTP ${response.code}: ${response.body?.string()?.take(200)}")
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("OpenAI TTS HTTP ${response.code}: ${response.body?.string()?.take(200)}")
+            }
+            val body = response.body ?: throw Exception("Empty response from OpenAI TTS")
+            if (onProgress == null) {
+                body.bytes()
+            } else {
+                val contentLength = body.contentLength()
+                val stream = body.byteStream()
+                if (contentLength <= 0L) {
+                    // No Content-Length header — read all at once, report done.
+                    stream.readBytes().also { onProgress(1.0f) }
+                } else {
+                    val out = java.io.ByteArrayOutputStream(contentLength.toInt())
+                    val buf = ByteArray(8192)
+                    var totalRead = 0L
+                    var n: Int
+                    while (stream.read(buf).also { n = it } != -1) {
+                        out.write(buf, 0, n)
+                        totalRead += n
+                        onProgress((totalRead.toFloat() / contentLength).coerceAtMost(1.0f))
+                    }
+                    out.toByteArray()
                 }
-                response.body?.bytes() ?: throw Exception("Empty response from OpenAI TTS")
             }
         }
+    }
 
     companion object {
         private const val TAG = "OpenAiTtsEngine"

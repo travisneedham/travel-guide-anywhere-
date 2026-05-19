@@ -25,6 +25,7 @@ import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -242,6 +243,19 @@ class MainFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { viewModel.tourState.collect { updateUiForState(it) } }
+                launch {
+                    combine(viewModel.tourState, viewModel.loadingProgress) { state, progress ->
+                        state to progress
+                    }.collect { (state, progress) ->
+                        val ind = binding.progressIndicator
+                        if (state == TourState.LOADING_AUDIO && progress >= 0f) {
+                            if (ind.isIndeterminate) ind.isIndeterminate = false
+                            ind.setProgressCompat((progress * 100).toInt(), false)
+                        } else if (!ind.isIndeterminate) {
+                            ind.isIndeterminate = true
+                        }
+                    }
+                }
                 launch { viewModel.currentTopic.collect { updateCurrentTopic(it) } }
                 launch { viewModel.mentionedPlaces.collect { updateMentionedList(it) } }
                 launch { viewModel.errorMessage.collect { it?.let { msg ->

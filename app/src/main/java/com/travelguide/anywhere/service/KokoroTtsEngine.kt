@@ -99,6 +99,7 @@ class KokoroTtsEngine(
         onDone: () -> Unit,
         onError: () -> Unit,
         onEnqueued: () -> Unit,
+        onProgress: ((Float) -> Unit)?,
     ) {
         // Detach the prewarm reference BEFORE stop() so stop() doesn't kill what
         // we are about to consume. stop() only ever clears the engine's own field.
@@ -112,12 +113,12 @@ class KokoroTtsEngine(
 
         val pipeline = if (candidate != null && candidate.text == text && candidate.speechRate == speechRate) {
             candidate.diag.markConsumedFromPrewarm()
+            // Prewarm completed — audio already buffered, report instant full progress.
+            onProgress?.invoke(1.0f)
             candidate
         } else {
-            // Either different text or different speed (user moved slider). Discard prewarmed
-            // audio — it was generated at the wrong rate so the adaptive projection is invalid.
             candidate?.cancel("prewarmed rate=${candidate?.speechRate} != requested=$speechRate")
-            startPipeline(engine, text, speechRate, labelPrefix = "fresh")
+            startPipeline(engine, text, speechRate, labelPrefix = "fresh", onProgress = onProgress)
         }
 
         speakJob = engineScope.launch {
@@ -153,6 +154,7 @@ class KokoroTtsEngine(
         text: String,
         speechRate: Float,
         labelPrefix: String,
+        onProgress: ((Float) -> Unit)? = null,
     ): NarrationPipeline {
         val chunks = splitIntoChunks(normalizeForTts(text))
         val channel = Channel<ChunkPlayer>(Channel.UNLIMITED)
@@ -204,16 +206,20 @@ class KokoroTtsEngine(
                         )
                         diag.recordAdaptiveDecision(i + 1, needed)
                         if (i + 1 >= needed) {
+                            onProgress?.invoke(1.0f)
                             val tFirst = SystemClock.elapsedRealtime() - t0
                             diag.tFirstMs = tFirst
                             diag.bufNUsed = needed
                             trigger.complete(tFirst)
+                        } else {
+                            onProgress?.invoke((i + 1).toFloat() / needed.coerceAtLeast(i + 2))
                         }
                     }
                 }
                 if (!trigger.isCompleted) {
                     // Generated all chunks without ever triggering — that means even bufN=N is
                     // the projection. Fire now (zero-pause guaranteed since everything is ready).
+                    onProgress?.invoke(1.0f)
                     val tFirst = SystemClock.elapsedRealtime() - t0
                     diag.tFirstMs = tFirst
                     diag.bufNUsed = chunks.size

@@ -41,6 +41,9 @@ class MainViewModel @Inject constructor(
     val currentPoiImage: StateFlow<String?> = TourGuideService.currentPoiImage
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val loadingProgress: StateFlow<Float> = TourGuideService.loadingProgress
+        .stateIn(viewModelScope, SharingStarted.Eagerly, -1f)
+
     fun startTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {
         TourGuideService.tourState.value = TourState.LOCATING
         TourGuideService.currentTopic.value = ""

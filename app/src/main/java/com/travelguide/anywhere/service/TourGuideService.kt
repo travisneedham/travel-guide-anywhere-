@@ -218,10 +218,13 @@ class TourGuideService : LifecycleService() {
         updateNotification("Loading audio: $topicName")
 
         val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
+        loadingProgress.value = -1f  // reset to indeterminate at the start of each load
         engine.speak(
             text = text,
             speechRate = speechRate,
+            onProgress = { fraction -> loadingProgress.value = fraction },
             onStart = {
+                loadingProgress.value = -1f  // clear progress once playback actually begins
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
                 lastLocation?.let { prefetchNextNarration(it) }
@@ -271,6 +274,7 @@ class TourGuideService : LifecycleService() {
                 currentNarrationPoi = null
                 currentNarrationCommit = null
                 isSpeaking = false
+                loadingProgress.value = -1f
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     prefetchJob?.cancel(); prefetchJob = null
@@ -325,6 +329,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
+        loadingProgress.value = -1f
         emitCurrentTopic("")
         emitCurrentPoiImage(null)
 
@@ -360,6 +365,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
+        loadingProgress.value = -1f
         emitState(TourState.IDLE)
         emitCurrentPoiImage(null)
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -465,6 +471,8 @@ class TourGuideService : LifecycleService() {
         val mentionedPlaces = MutableStateFlow<List<MentionedPlacesStore.Entry>>(emptyList())
         val errorMessage = MutableStateFlow<String?>(null)
         val currentPoiImage = MutableStateFlow<String?>(null)
+        /** -1f = indeterminate; 0.0–1.0 = known loading progress for LOADING_AUDIO state. */
+        val loadingProgress = MutableStateFlow(-1f)
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }
