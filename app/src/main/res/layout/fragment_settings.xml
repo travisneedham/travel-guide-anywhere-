@@ -765,6 +765,14 @@
                     android:text="Export Full Log File" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_export_auto_logs"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Export Android Auto Logs" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_run_experiment"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"

@@ -86,7 +86,10 @@ class TourGuideService : LifecycleService() {
                 radiusMiles = intent.getFloatExtra(EXTRA_RADIUS_MILES, 1f)
                 apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
                 famousMode = intent.getBooleanExtra(EXTRA_FAMOUS_MODE, false)
-                sharedPrefs.edit().putFloat(PREF_LAST_RADIUS, radiusMiles).apply()
+                sharedPrefs.edit()
+                    .putFloat(PREF_LAST_RADIUS, radiusMiles)
+                    .putBoolean(PREF_FAMOUS_MODE, famousMode)
+                    .apply()
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
                 requestLocationUpdates()
                 emitState(TourState.LOCATING)
@@ -463,6 +466,7 @@ class TourGuideService : LifecycleService() {
         const val ACTION_SET_SPEED = "ACTION_SET_SPEED"
         const val EXTRA_SPEECH_RATE = "EXTRA_SPEECH_RATE"
         const val PREF_LAST_RADIUS = "pref_last_radius"
+        const val PREF_FAMOUS_MODE = "pref_famous_mode"
         private const val TAG = "TourGuideService"
 
         val tourState = MutableStateFlow(TourState.IDLE)

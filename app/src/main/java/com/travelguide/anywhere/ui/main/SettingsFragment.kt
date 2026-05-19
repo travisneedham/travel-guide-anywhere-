@@ -39,6 +39,7 @@ import com.travelguide.anywhere.service.PiperModelManager
 import com.travelguide.anywhere.service.PiperTtsEngine
 import com.travelguide.anywhere.service.PiperVoice
 import com.travelguide.anywhere.service.PiperVoices
+import com.travelguide.anywhere.service.TourAutoMediaService
 import com.travelguide.anywhere.service.TourGuideService
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
@@ -641,6 +642,52 @@ class SettingsFragment : Fragment() {
                     .show()
             }
         }
+        binding.btnExportAutoLogs.setOnClickListener {
+            lifecycleScope.launch {
+                val logs = readAutoLogs()
+                val ctx = requireContext()
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                data class SaveResult(val displayPath: String, val uri: Uri)
+                val saved = withContext(Dispatchers.IO) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val resolver = ctx.contentResolver
+                        val cv = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, "auto_log_$ts.txt")
+                            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                        resolver.openOutputStream(uri)!!.use { it.write(logs.toByteArray()) }
+                        cv.clear()
+                        cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        resolver.update(uri, cv, null, null)
+                        SaveResult("Downloads/auto_log_$ts.txt", uri)
+                    } else {
+                        val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
+                        outDir.mkdirs()
+                        val f = File(outDir, "auto_log_$ts.txt").also { it.writeText(logs) }
+                        SaveResult(
+                            f.absolutePath,
+                            FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+                        )
+                    }
+                }
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Android Auto Log Saved")
+                    .setMessage("Saved to:\n${saved.displayPath}\n\nOpen the Files app → Downloads to find it.")
+                    .setPositiveButton("Share File") { _, _ ->
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, saved.uri)
+                            putExtra(Intent.EXTRA_SUBJECT, "Android Auto Log $ts")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(shareIntent, "Share Auto Log File"))
+                    }
+                    .setNegativeButton("Done", null)
+                    .show()
+            }
+        }
     }
 
     private fun saveSettings() {
@@ -697,6 +744,27 @@ class SettingsFragment : Fragment() {
                 .filter { line -> interestingTags.any { line.contains(it) } }
                 .joinToString("\n")
                 .ifBlank { "(no TTS logs found — run a tour first)" }
+        } catch (e: Exception) {
+            "Error reading logcat: ${e.message}"
+        }
+    }
+
+    private suspend fun readAutoLogs(): String = withContext(Dispatchers.IO) {
+        val autoTags = setOf(
+            TourAutoMediaService.TAG,
+            "MediaSessionCompat", "MediaSession", "AudioFocus",
+            "AudioManager", "TourGuideService", "TourAutoMedia"
+        )
+        try {
+            val pid = android.os.Process.myPid().toString()
+            val process = Runtime.getRuntime().exec(
+                arrayOf("logcat", "-d", "--pid", pid, "-v", "time")
+            )
+            val lines = process.inputStream.bufferedReader()
+                .lineSequence()
+                .filter { line -> autoTags.any { line.contains(it) } }
+                .joinToString("\n")
+            lines.ifBlank { "(no Android Auto logs found — connect to Android Auto and run a tour first)" }
         } catch (e: Exception) {
             "Error reading logcat: ${e.message}"
         }
