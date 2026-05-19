@@ -45,15 +45,15 @@ class RouteRepository @Inject constructor(
             Log.d(TAG, "Expanded URL: $fullUrl")
 
             val parsed = parseGoogleMapsUrl(fullUrl)
-                ?: return@withContext Failure("Could not find an origin and destination in that link.")
+                ?: return@withContext Result.Failure("Could not find an origin and destination in that link.")
 
             val (originStr, destStr, travelMode) = parsed
             Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode")
 
             val origin = geocodeIfNeeded(originStr)
-                ?: return@withContext Failure("Could not locate: $originStr")
+                ?: return@withContext Result.Failure("Could not locate: $originStr")
             val dest = geocodeIfNeeded(destStr)
-                ?: return@withContext Failure("Could not locate: $destStr")
+                ?: return@withContext Result.Failure("Could not locate: $destStr")
 
             val coordsStr = "${origin.lon},${origin.lat};${dest.lon},${dest.lat}"
             val osrmResponse = osrmService.getRoute(
@@ -64,11 +64,11 @@ class RouteRepository @Inject constructor(
             )
 
             val route = osrmResponse.routes.firstOrNull()
-                ?: return@withContext Failure("No route found between those locations.")
+                ?: return@withContext Result.Failure("No route found between those locations.")
 
             val distanceMiles = route.distance / 1609.34
             if (distanceMiles > 500) {
-                return@withContext Failure(
+                return@withContext Result.Failure(
                     "Route is ${distanceMiles.toInt()} miles — maximum is 500 miles."
                 )
             }
@@ -76,9 +76,9 @@ class RouteRepository @Inject constructor(
             val waypoints = route.geometry.coordinates.map { coord ->
                 LatLon(lat = coord[1], lon = coord[0])
             }
-            if (waypoints.isEmpty()) return@withContext Failure("Route has no waypoints.")
+            if (waypoints.isEmpty()) return@withContext Result.Failure("Route has no waypoints.")
 
-            Success(
+            Result.Success(
                 RouteData(
                     waypoints = waypoints,
                     totalDistanceMeters = route.distance,
@@ -90,7 +90,7 @@ class RouteRepository @Inject constructor(
             )
         } catch (e: Exception) {
             Log.e(TAG, "Route resolution failed", e)
-            Failure("Route lookup failed: ${e.message}")
+            Result.Failure("Route lookup failed: ${e.message}")
         }
     }
 
