@@ -43,6 +43,8 @@ class MainFragment : Fragment() {
 
     private var sliderInSpeedMode = false
     private var isFamousMode = false
+    private var tourIsActive = false
+    private var blockModeChange = false
 
     // Separate saved values per mode so switching back restores the last-used radius.
     private var savedNearbySliderValue = 4f   // 1 mile
@@ -80,8 +82,15 @@ class MainFragment : Fragment() {
         if (isFamousMode) binding.toggleMode.check(R.id.btn_mode_famous)
         else binding.toggleMode.check(R.id.btn_mode_nearby)
 
-        binding.toggleMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+        binding.toggleMode.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
+            if (blockModeChange) return@addOnButtonCheckedListener
+            if (tourIsActive) {
+                blockModeChange = true
+                group.check(if (isFamousMode) R.id.btn_mode_famous else R.id.btn_mode_nearby)
+                blockModeChange = false
+                return@addOnButtonCheckedListener
+            }
             val newFamous = checkedId == R.id.btn_mode_famous
             if (newFamous == isFamousMode) return@addOnButtonCheckedListener
 
@@ -194,6 +203,7 @@ class MainFragment : Fragment() {
                 addToBackStack(null)
             }
         }
+        binding.ivPoiImage.setOnClickListener { showFullScreenImage() }
     }
 
     // ── Kokoro startup ─────────────────────────────────────────────────────────
@@ -315,7 +325,8 @@ class MainFragment : Fragment() {
         binding.btnStop.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.cardStatus.visibility = if (isActive) View.VISIBLE else View.GONE
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
-        binding.toggleMode.isEnabled = !isActive
+        tourIsActive = isActive
+        binding.toggleMode.alpha = if (isActive) 0.78f else 1.0f
         if (isActive) switchSliderToSpeedMode() else switchSliderToRangeMode()
 
         val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
@@ -414,6 +425,39 @@ class MainFragment : Fragment() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showFullScreenImage() {
+        val url = viewModel.currentPoiImage.value ?: return
+        val ctx = requireContext()
+        val dialog = android.app.Dialog(ctx, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+
+        val zoomView = ZoomableImageView(ctx).apply {
+            load(url)
+        }
+
+        val btnClose = android.widget.TextView(ctx).apply {
+            text = "✕"
+            textSize = 22f
+            setTextColor(0xCCFFFFFF.toInt())
+            setPadding(32, 48, 32, 32)
+            setOnClickListener { dialog.dismiss() }
+        }
+
+        val frame = android.widget.FrameLayout(ctx).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            addView(zoomView, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            addView(btnClose, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP or android.view.Gravity.END
+            ))
+        }
+        dialog.setContentView(frame)
+        dialog.show()
     }
 
     override fun onDestroyView() {

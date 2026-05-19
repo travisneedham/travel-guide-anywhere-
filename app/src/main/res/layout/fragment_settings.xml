@@ -4,7 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/background">
+    android:background="@color/background"
+    android:paddingTop="12dp">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -177,7 +178,7 @@
                         android:id="@+id/rb_android"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Android TTS (free, offline, low quality)"
+                        android:text="Android TTS (free, offline, instant, low quality)"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/accent" />
 
@@ -516,6 +517,85 @@
                 android:background="@color/stroke" />
 
             <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- HISTORY section (collapsed by default)                  -->
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <LinearLayout
+                android:id="@+id/header_history"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="HISTORY"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.1" />
+
+                <TextView
+                    android:id="@+id/ind_history"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▶"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/body_history"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_history_expiry_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Narration memory: 30 days"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="4dp" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/slider_history_expiry"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:valueFrom="5"
+                    android:valueTo="90"
+                    android:stepSize="5"
+                    android:value="30"
+                    android:layout_marginBottom="8dp"
+                    app:thumbColor="@color/accent"
+                    app:trackColorActive="@color/accent"
+                    app:trackColorInactive="@color/stroke" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_clear_history"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Clear Session History"
+                    android:textColor="@color/stop_color" />
+
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/stroke" />
+
+            <!-- ═══════════════════════════════════════════════════════ -->
             <!-- NARRATION PROMPTS section (collapsed by default)        -->
             <!-- ═══════════════════════════════════════════════════════ -->
             <LinearLayout
@@ -708,37 +788,6 @@
                 android:paddingTop="4dp"
                 android:paddingBottom="8dp"
                 android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/tv_history_expiry_label"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Narration memory: 30 days"
-                    android:textSize="13sp"
-                    android:textColor="@color/text_secondary"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="4dp" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/slider_history_expiry"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:valueFrom="5"
-                    android:valueTo="90"
-                    android:stepSize="5"
-                    android:value="30"
-                    android:layout_marginBottom="8dp"
-                    app:thumbColor="@color/accent"
-                    app:trackColorActive="@color/accent"
-                    app:trackColorInactive="@color/stroke" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_clear_history"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Clear Session History"
-                    android:textColor="@color/stop_color" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_copy_logs"

@@ -121,6 +121,7 @@ class SettingsFragment : Fragment() {
         binding.headerApi.setOnClickListener { toggle(binding.bodyApi, binding.indApi) }
         binding.headerVoice.setOnClickListener { toggle(binding.bodyVoice, binding.indVoice) }
         binding.headerInterests.setOnClickListener { toggle(binding.bodyInterests, binding.indInterests) }
+        binding.headerHistory.setOnClickListener { toggle(binding.bodyHistory, binding.indHistory) }
         binding.headerPrompts.setOnClickListener { toggle(binding.bodyPrompts, binding.indPrompts) }
         binding.headerDiag.setOnClickListener { toggle(binding.bodyDiag, binding.indDiag) }
     }

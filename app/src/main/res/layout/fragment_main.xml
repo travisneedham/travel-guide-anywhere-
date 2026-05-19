@@ -12,7 +12,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="24dp"
+        android:paddingTop="40dp">
 
         <!-- Header row -->
         <LinearLayout
@@ -159,6 +160,10 @@
                     android:scaleType="centerCrop"
                     android:visibility="gone"
                     android:layout_marginBottom="4dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="View full image"
                     app:shapeAppearance="@style/ShapeAppearance.Material3.Corner.Medium"
                     tools:visibility="visible"
                     tools:src="@color/stroke" />
