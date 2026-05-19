@@ -354,6 +354,12 @@ class MainFragment : Fragment() {
                         val sid = prefs.getInt(PREF_KOKORO_VOICE_SID, DEFAULT_KOKORO_VOICE_SID)
                         KOKORO_VOICES.getOrNull(sid)?.first?.substringBefore(" ") ?: ""
                     }
+                    "piper" -> {
+                        val voiceId = prefs.getString(TourGuideService.PREF_PIPER_VOICE_ID,
+                            com.travelguide.anywhere.service.PiperVoices.DEFAULT_VOICE_ID) ?: ""
+                        com.travelguide.anywhere.service.PiperVoices.byId(voiceId)
+                            ?.displayName?.substringBefore(" ") ?: ""
+                    }
                     "openai" -> "OpenAI"
                     else -> ""
                 }
