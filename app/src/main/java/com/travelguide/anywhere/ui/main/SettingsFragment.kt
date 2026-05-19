@@ -100,6 +100,7 @@ class SettingsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         setupToolbar()
         setupCollapsibleSections()
+        setupFeedback()
         loadApiKey()
         loadVoiceSettings()
         loadInterestFilters()
@@ -115,12 +116,92 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun setupFeedback() {
+        binding.etFeedback.setOnTouchListener { v, event ->
+            v.parent.requestDisallowInterceptTouchEvent(true)
+            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                v.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+
+        binding.btnSendFeedback.setOnClickListener {
+            val feedbackText = binding.etFeedback.text?.toString()?.trim() ?: ""
+            if (feedbackText.isBlank()) {
+                Toast.makeText(requireContext(), "Please describe what happened first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            binding.btnSendFeedback.isEnabled = false
+            binding.btnSendFeedback.text = "Preparing…"
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                val ctx = requireContext()
+
+                val ttsProvider = prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android") ?: "android"
+                val isTripMode = prefs.getBoolean(MainFragment.PREF_TRIP_MODE, false)
+                val isFamousSort = prefs.getBoolean(MainFragment.PREF_FAMOUS_SORT, false)
+                val radiusIndex = prefs.getInt(MainFragment.PREF_RADIUS_INDEX, MainFragment.DEFAULT_RADIUS_INDEX)
+                val radiusMiles = MainFragment.SLIDER_MILES.getOrElse(radiusIndex) { 5f }
+                val apiKeySet = !prefs.getString(MainFragment.PREF_API_KEY, "").isNullOrBlank()
+
+                val emailBody = buildString {
+                    appendLine("FEEDBACK")
+                    appendLine("========")
+                    appendLine(feedbackText)
+                    appendLine()
+                    appendLine("DEVICE & APP")
+                    appendLine("------------")
+                    appendLine("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                    appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                    appendLine()
+                    appendLine("SETTINGS")
+                    appendLine("--------")
+                    appendLine("TTS Provider: $ttsProvider")
+                    appendLine("Kokoro model: ${if (kokoroModelManager.isReady) "downloaded" else "not downloaded"}")
+                    appendLine("Mode: ${if (isTripMode) "Trip" else "Live"}")
+                    appendLine("Sort: ${if (isFamousSort) "Most Famous First" else "Closest First"}")
+                    appendLine("Radius: ${"%.2f".format(radiusMiles)} miles")
+                    appendLine("API key configured: $apiKeySet")
+                    appendLine()
+                    appendLine("Full app log attached.")
+                }
+
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val logFile = File(ctx.cacheDir, "feedback_log_$ts.txt")
+                withContext(Dispatchers.IO) { logFile.writeText(readLogcat(maxLines = null)) }
+                val logUri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", logFile)
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "message/rfc822"
+                    putExtra(Intent.EXTRA_EMAIL, arrayOf(FEEDBACK_EMAIL))
+                    putExtra(Intent.EXTRA_SUBJECT, "[Travel Guide] v${BuildConfig.VERSION_NAME} — ${Build.MODEL}")
+                    putExtra(Intent.EXTRA_TEXT, emailBody)
+                    putExtra(Intent.EXTRA_STREAM, logUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                binding.btnSendFeedback.isEnabled = true
+                binding.btnSendFeedback.text = "Send Feedback via Email"
+
+                try {
+                    startActivity(Intent.createChooser(intent, "Send Feedback"))
+                    binding.etFeedback.setText("")
+                } catch (_: android.content.ActivityNotFoundException) {
+                    Toast.makeText(ctx, "No email app found", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     private fun setupCollapsibleSections() {
         fun toggle(body: View, indicator: android.widget.TextView) {
             val expanding = body.visibility == View.GONE
             body.visibility = if (expanding) View.VISIBLE else View.GONE
             indicator.text = if (expanding) "▼" else "▶"
         }
+        binding.headerFeedback.setOnClickListener { toggle(binding.bodyFeedback, binding.indFeedback) }
         binding.headerApi.setOnClickListener { toggle(binding.bodyApi, binding.indApi) }
         binding.headerVoice.setOnClickListener { toggle(binding.bodyVoice, binding.indVoice) }
         binding.headerInterests.setOnClickListener { toggle(binding.bodyInterests, binding.indInterests) }
@@ -898,5 +979,10 @@ class SettingsFragment : Fragment() {
         piperPreviewTtsVoiceId = null
         super.onDestroyView()
         _binding = null
+    }
+
+    companion object {
+        // Replace with your actual feedback email address before publishing.
+        const val FEEDBACK_EMAIL = "your-email@example.com"
     }
 }
