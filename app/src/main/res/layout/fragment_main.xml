@@ -337,6 +337,35 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- GO button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_go"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="@string/btn_go"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/accent"
+            app:cornerRadius="32dp"
+            app:icon="@drawable/ic_play"
+            app:iconGravity="textStart"
+            app:iconPadding="12dp" />
+
+        <!-- STOP button (hidden when idle) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_stop"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="@string/btn_stop"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            app:backgroundTint="@color/stop_color"
+            app:cornerRadius="32dp"
+            app:icon="@drawable/ic_stop"
+            app:iconGravity="textStart"
+            app:iconPadding="12dp" />
+
         <!-- Recently mentioned places header + "See all" link -->
         <LinearLayout
             android:id="@+id/layout_mentioned_header"
@@ -345,6 +374,7 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:visibility="gone"
+            android:layout_marginTop="24dp"
             android:layout_marginBottom="8dp">
 
             <TextView
@@ -378,35 +408,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:layout_marginBottom="32dp" />
-
-        <!-- GO button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_go"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:text="@string/btn_go"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            app:backgroundTint="@color/accent"
-            app:cornerRadius="32dp"
-            app:icon="@drawable/ic_play"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp" />
-
-        <!-- STOP button (hidden when idle) -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_stop"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:text="@string/btn_stop"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:visibility="gone"
-            app:backgroundTint="@color/stop_color"
-            app:cornerRadius="32dp"
-            app:icon="@drawable/ic_stop"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp" />
 
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
