@@ -88,6 +88,11 @@ class PoiRepository @Inject constructor(
         val pois = overpassResponse.elements
             .filter { it.tags.containsKey("name") }
             .filter { element ->
+                // Exclude retail/commercial shops (hardware stores, chain stores, etc.).
+                // Only allow through if they also carry a historic designation.
+                element.tags["shop"] == null || element.tags["historic"] != null
+            }
+            .filter { element ->
                 // Drop administrative place nodes (cities, towns, counties…).  They carry
                 // wikipedia/wikidata tags and would score 1000+ pts, drowning out actual
                 // attractions like museums and historic sites.
@@ -149,7 +154,7 @@ class PoiRepository @Inject constructor(
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:30];\n" +
         "(\n" +
-        "  node[\"name\"][\"wikipedia\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
