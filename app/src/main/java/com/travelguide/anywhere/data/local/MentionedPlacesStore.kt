@@ -19,7 +19,10 @@ class MentionedPlacesStore @Inject constructor(
         val name: String,
         val lat: Double,
         val lon: Double,
-        val mentionedAt: Long = System.currentTimeMillis()
+        val mentionedAt: Long = System.currentTimeMillis(),
+        val summary: String = "",
+        val thumbsDown: Boolean = false,
+        val autoSkipped: Boolean = false,
     )
 
     private val file: File get() = File(context.filesDir, "mentioned_places.json")
@@ -43,13 +46,40 @@ class MentionedPlacesStore @Inject constructor(
         }
     }
 
-    // Persists a POI to disk. No-op if already in the file (by osmId).
-    fun commit(osmId: String, name: String, lat: Double, lon: Double) {
+    // Persists a narrated POI with its AI-generated summary.
+    fun commitWithSummary(osmId: String, name: String, lat: Double, lon: Double, summary: String) {
         if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis()))
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary))
             save()
         }
     }
+
+    // Persists a skipped POI (no summary available).
+    fun commit(osmId: String, name: String, lat: Double, lon: Double) {
+        if (_entries.none { it.osmId == osmId }) {
+            _entries.add(Entry(osmId, name, lat, lon))
+            save()
+        }
+    }
+
+    // Persists a POI that was auto-skipped due to similarity with disliked places.
+    fun commitAutoSkipped(osmId: String, name: String, lat: Double, lon: Double, summary: String) {
+        if (_entries.none { it.osmId == osmId }) {
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, autoSkipped = true))
+            save()
+        }
+    }
+
+    // Toggles the thumbsDown flag for an entry and persists.
+    fun markThumbsDown(osmId: String) {
+        val idx = _entries.indexOfFirst { it.osmId == osmId }
+        if (idx >= 0) {
+            _entries[idx] = _entries[idx].copy(thumbsDown = !_entries[idx].thumbsDown)
+            save()
+        }
+    }
+
+    fun thumbsDownEntries(): List<Entry> = _entries.filter { it.thumbsDown && it.summary.isNotBlank() }
 
     fun clear() {
         _entries.clear()

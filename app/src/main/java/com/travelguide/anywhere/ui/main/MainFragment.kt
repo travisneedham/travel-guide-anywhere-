@@ -461,10 +461,18 @@ class MainFragment : Fragment() {
         }
         binding.layoutMentionedHeader.visibility = View.VISIBLE
         val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+        val colorSecondary = requireContext().getColor(R.color.text_secondary)
         entries.forEachIndexed { index, entry ->
             val row = LayoutInflater.from(requireContext())
                 .inflate(R.layout.item_mentioned_place, binding.llMentionedPlaces, false)
-            row.findViewById<TextView>(R.id.tv_place_name).text = entry.name
+            val tvName = row.findViewById<TextView>(R.id.tv_place_name)
+            val tvSummary = row.findViewById<TextView>(R.id.tv_place_summary)
+            tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
+            if (entry.autoSkipped) tvName.setTextColor(colorSecondary)
+            if (entry.summary.isNotBlank()) {
+                tvSummary.text = entry.summary
+                tvSummary.visibility = View.VISIBLE
+            }
             row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
             binding.llMentionedPlaces.addView(row)
             if (index < entries.lastIndex) {
@@ -508,10 +516,18 @@ class MainFragment : Fragment() {
             val hPad = (20 * resources.displayMetrics.density).toInt()
             setPadding(hPad, 0, hPad, 0)
         }
+        val colorSecondary = ctx.getColor(R.color.text_secondary)
         entries.forEachIndexed { index, entry ->
             val row = LayoutInflater.from(ctx)
                 .inflate(R.layout.item_mentioned_place, list, false)
-            row.findViewById<TextView>(R.id.tv_place_name).text = entry.name
+            val tvName = row.findViewById<TextView>(R.id.tv_place_name)
+            val tvSummary = row.findViewById<TextView>(R.id.tv_place_summary)
+            tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
+            if (entry.autoSkipped) tvName.setTextColor(colorSecondary)
+            if (entry.summary.isNotBlank()) {
+                tvSummary.text = entry.summary
+                tvSummary.visibility = View.VISIBLE
+            }
             row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
             list.addView(row)
             if (index < entries.lastIndex) {

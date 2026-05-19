@@ -30,7 +30,8 @@ class NarrationRepository @Inject constructor(
 
     data class NarrationResult(
         val text: String,
-        /** Call this alongside mentionedPlacesStore.commit() — never before. */
+        val summary: String = "",
+        /** Call this alongside mentionedPlacesStore.commitWithSummary() — never before. */
         val commitHistory: () -> Unit,
     )
 
@@ -65,10 +66,18 @@ class NarrationRepository @Inject constructor(
             .replace("{location}", locationStr)
             .replace("{poi}", poiLine)
 
-        val userMessageText = if (wikiExtract != null) {
-            "$baseUserMessage\n\n---\nBackground context from Wikipedia:\n\n$wikiExtract"
-        } else {
-            baseUserMessage
+        // Always appended — needed to populate the Places Covered summary.
+        val summaryInstruction = "\n\nBefore your narration, write one sentence on the very first line " +
+            "that describes what this place is — for example: \"A mid-nineteenth-century lighthouse " +
+            "perched on a rocky headland\" or \"The childhood home of a notorious outlaw.\" " +
+            "Do not start with the place name. Follow it with exactly one blank line, then begin your narration."
+
+        val userMessageText = buildString {
+            append(baseUserMessage)
+            if (wikiExtract != null) {
+                append("\n\n---\nBackground context from Wikipedia:\n\n$wikiExtract")
+            }
+            append(summaryInstruction)
         }
 
         val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
@@ -96,7 +105,8 @@ class NarrationRepository @Inject constructor(
                 val response = claudeApi.createMessage(apiKey = apiKey, request = request)
                 val text = response.text
                 if (text.isNotBlank()) {
-                    return NarrationResult(text = text, commitHistory = {
+                    val (summary, narrationText) = parseSummaryAndNarration(text)
+                    return NarrationResult(text = narrationText, summary = summary, commitHistory = {
                         historyStore.append(
                             userMessage = userMessageText,
                             assistantMessage = text,
@@ -118,6 +128,56 @@ class NarrationRepository @Inject constructor(
         }
 
         return NarrationResult(text = "Unable to generate narration at this time.", commitHistory = {})
+    }
+
+    /**
+     * Asks Claude (Haiku, cheapest model) whether a candidate POI belongs to the same
+     * category as any of the user's disliked place summaries. Returns false on any error
+     * so errors never cause unwanted skips.
+     */
+    suspend fun isSimilarToDisliked(
+        poiName: String,
+        poiDesc: String,
+        dislikedSummaries: List<String>,
+        apiKey: String,
+    ): Boolean {
+        if (dislikedSummaries.isEmpty()) return false
+        val list = dislikedSummaries.take(20).joinToString("\n") { "- $it" }
+        val request = ClaudeRequest(
+            model = "claude-haiku-4-5-20251001",
+            system = "Answer YES or NO only, nothing else.",
+            messages = listOf(ClaudeMessage(
+                role = "user",
+                content = "The user disliked these types of places:\n$list\n\n" +
+                    "Is \"$poiName\" ($poiDesc) the same type or category as any of them? " +
+                    "Answer YES if it is the same kind of place. Answer NO otherwise."
+            )),
+            maxTokens = 5,
+        )
+        return try {
+            claudeApi.createMessage(apiKey = apiKey, request = request)
+                .text.trim().startsWith("YES", ignoreCase = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "Similarity check failed for '$poiName': ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Splits Claude's response into a one-sentence summary (first line) and the narration body.
+     * Falls back to ("", fullText) if the response doesn't follow the expected format.
+     */
+    private fun parseSummaryAndNarration(text: String): Pair<String, String> {
+        val idx = text.indexOf("\n\n")
+        if (idx in 1..300) {
+            val firstLine = text.substring(0, idx).trim()
+            val rest = text.substring(idx + 2).trim()
+            // The summary should be a single sentence, much shorter than the narration.
+            if (firstLine.isNotBlank() && rest.isNotBlank() && firstLine.length < rest.length / 2) {
+                return firstLine to rest
+            }
+        }
+        return "" to text
     }
 
     // Fetch the intro section of a Wikipedia article. Returns null on any failure.

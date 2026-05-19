@@ -22,6 +22,7 @@ import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
+import com.travelguide.anywhere.data.model.PoiType
 import com.travelguide.anywhere.data.model.RouteData
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiImageRepository
@@ -59,10 +60,12 @@ class TourGuideService : LifecycleService() {
     private var routeAdvanceJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
+    private var isReplayMode = false
     private var savedTopicName = ""
 
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
     @Volatile private var currentNarrationCommit: (() -> Unit)? = null
+    @Volatile private var currentNarrationSummary: String = ""
     @Volatile private var speakStartTime: Long = 0L
     @Volatile private var prefetchedNarration: Pair<PlaceOfInterest, String>? = null
     @Volatile private var prefetchedNarrationCommit: (() -> Unit)? = null
@@ -104,9 +107,69 @@ class TourGuideService : LifecycleService() {
             ACTION_RESUME -> resumeTour()
             ACTION_SKIP -> skipCurrent()
             ACTION_SET_SPEED -> ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 0.95f))
+            ACTION_REPLAY_POI -> handleReplayPoi(intent)
         }
 
         return START_STICKY
+    }
+
+    private fun handleReplayPoi(intent: Intent) {
+        val osmId = intent.getStringExtra(EXTRA_POI_OSM_ID) ?: return
+        val name = intent.getStringExtra(EXTRA_POI_NAME) ?: return
+        val lat = intent.getDoubleExtra(EXTRA_POI_LAT, 0.0)
+        val lon = intent.getDoubleExtra(EXTRA_POI_LON, 0.0)
+        apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: ""
+        initTtsEngine()
+        mentionedPlacesStore.load()
+        narrationHistoryStore.load()
+        isReplayMode = true
+        startForeground(NOTIFICATION_ID, buildNotification("Replaying: $name", true))
+        startReplayCycle(osmId, name, lat, lon)
+    }
+
+    private fun startReplayCycle(osmId: String, name: String, lat: Double, lon: Double) {
+        generationJob?.cancel()
+        generationJob = lifecycleScope.launch {
+            try {
+                isGenerating = true
+                emitState(TourState.GENERATING)
+                updateNotification("Writing narration for $name...", true)
+
+                val location = Location("replay").apply {
+                    latitude = lat
+                    longitude = lon
+                }
+                val poi = PlaceOfInterest(
+                    osmId = osmId,
+                    name = name,
+                    lat = lat,
+                    lon = lon,
+                    type = PoiType.ATTRACTION,
+                    tags = emptyMap(),
+                )
+                currentNarrationPoi = poi
+                currentNarrationSummary = ""
+                emitCurrentPois(listOf(poi))
+                emitCurrentPoiImage(null)
+
+                val result = narrationRepository.generateNarration(
+                    listOf(poi), location, radiusMiles.coerceAtLeast(1f), apiKey
+                )
+                currentNarrationCommit = result.commitHistory
+                currentNarrationSummary = result.summary
+                isGenerating = false
+                speak(result.text, name)
+            } catch (e: CancellationException) {
+                isGenerating = false
+                isReplayMode = false
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in replay cycle", e)
+                isGenerating = false
+                isReplayMode = false
+                stopTour()
+            }
+        }
     }
 
     private fun startRouteSimulation(route: RouteData) {
@@ -168,12 +231,22 @@ class TourGuideService : LifecycleService() {
                     return@launch
                 }
 
+                // Select the first POI that isn't similar to any disliked places.
+                val poi = selectPoi(pois, apiKey)
+                if (poi == null) {
+                    Log.d(TAG, "All POIs auto-skipped — emitting NO_NEW_POIS")
+                    emitState(TourState.NO_NEW_POIS)
+                    updateNotification("Exploring... waiting for new places", true)
+                    isGenerating = false
+                    return@launch
+                }
+
                 emitState(TourState.GENERATING)
                 updateNotification("Writing your tour narration...", true)
 
-                val poi = pois.first()
                 mentionedPlacesStore.sessionNames.add(poi.name)
                 currentNarrationPoi = poi
+                currentNarrationSummary = ""
                 emitCurrentPois(listOf(poi))
 
                 // Fetch POI image in background — non-blocking for the narration flow.
@@ -187,6 +260,7 @@ class TourGuideService : LifecycleService() {
 
                 val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
                 currentNarrationCommit = result.commitHistory
+                currentNarrationSummary = result.summary
                 isGenerating = false
                 speak(result.text, poi.name)
 
@@ -203,6 +277,34 @@ class TourGuideService : LifecycleService() {
                 lastLocation?.let { startGenerationCycle(it) }
             }
         }
+    }
+
+    /**
+     * Iterates through candidates and returns the first one that should not be auto-skipped,
+     * committing any skipped ones to the store. Returns null if all candidates are skipped.
+     * Caps at 5 auto-skips per cycle to bound API cost.
+     */
+    private suspend fun selectPoi(candidates: List<PlaceOfInterest>, apiKey: String): PlaceOfInterest? {
+        val disliked = mentionedPlacesStore.thumbsDownEntries()
+        var skipped = 0
+        for (candidate in candidates) {
+            if (disliked.isNotEmpty() && skipped < 5) {
+                val desc = "${candidate.name} — ${candidate.shortDescription}"
+                val similar = narrationRepository.isSimilarToDisliked(
+                    candidate.name, desc, disliked.map { it.summary }, apiKey
+                )
+                if (similar) {
+                    Log.d(TAG, "AUTO-SKIP: '${candidate.name}' is similar to disliked places")
+                    mentionedPlacesStore.commitAutoSkipped(candidate.osmId, candidate.name, candidate.lat, candidate.lon, desc)
+                    mentionedPlacesStore.sessionNames.add(candidate.name)
+                    mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                    skipped++
+                    continue
+                }
+            }
+            return candidate
+        }
+        return null
     }
 
     private fun prefetchNextNarration(location: Location) {
@@ -269,23 +371,32 @@ class TourGuideService : LifecycleService() {
                 loadingProgress.value = -1f  // clear progress once playback actually begins
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
-                Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
-                lastLocation?.let { prefetchNextNarration(it) }
+                if (!isReplayMode) {
+                    Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
+                    lastLocation?.let { prefetchNextNarration(it) }
+                }
             },
             onEnqueued = {},
             onDone = {
                 val duration = System.currentTimeMillis() - speakStartTime
                 val poi = currentNarrationPoi
                 val commit = currentNarrationCommit.also { currentNarrationCommit = null }
+                val summary = currentNarrationSummary.also { currentNarrationSummary = "" }
                 currentNarrationPoi = null
                 isSpeaking = false
                 Log.i(TAG, "TTS onDone '${poi?.name}' — played ${duration}ms, prefetchReady=${prefetchedNarration != null}, prefetchJobActive=${prefetchJob?.isActive}")
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     if (poi != null && duration >= 10_000L) {
-                        mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+                        mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary)
                         commit?.invoke()
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                    }
+
+                    if (isReplayMode) {
+                        isReplayMode = false
+                        stopTour()
+                        return@launch
                     }
 
                     val prefetched = prefetchedNarration.also { prefetchedNarration = null }
@@ -300,6 +411,7 @@ class TourGuideService : LifecycleService() {
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
                         currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
+                        currentNarrationSummary = ""
                         emitCurrentPois(listOf(nextPoi))
                         // Fetch image for prefetched POI.
                         emitCurrentPoiImage(null)
@@ -322,6 +434,7 @@ class TourGuideService : LifecycleService() {
             onError = {
                 currentNarrationPoi = null
                 currentNarrationCommit = null
+                currentNarrationSummary = ""
                 isSpeaking = false
                 loadingProgress.value = -1f
                 lifecycleScope.launch {
@@ -329,7 +442,12 @@ class TourGuideService : LifecycleService() {
                     prefetchJob?.cancel(); prefetchJob = null
                     prefetchedNarration = null
                     prefetchedNarrationCommit = null
-                    lastLocation?.let { onLocationUpdate(it) }
+                    if (isReplayMode) {
+                        isReplayMode = false
+                        stopTour()
+                    } else {
+                        lastLocation?.let { onLocationUpdate(it) }
+                    }
                 }
             }
         )
@@ -368,6 +486,7 @@ class TourGuideService : LifecycleService() {
         }
         currentNarrationPoi = null
         currentNarrationCommit = null
+        currentNarrationSummary = ""
 
         // Capture prefetch before cancelling jobs so we can use it immediately.
         val prefetched = prefetchedNarration.also { prefetchedNarration = null }
@@ -391,6 +510,7 @@ class TourGuideService : LifecycleService() {
             mentionedPlacesStore.sessionNames.add(nextPoi.name)
             currentNarrationCommit = nextCommit
             currentNarrationPoi = nextPoi
+            currentNarrationSummary = ""
             emitCurrentPois(listOf(nextPoi))
             imageFetchJob = lifecycleScope.launch {
                 emitCurrentPoiImage(
@@ -406,6 +526,8 @@ class TourGuideService : LifecycleService() {
     private fun stopTour() {
         currentNarrationPoi = null
         currentNarrationCommit = null
+        currentNarrationSummary = ""
+        isReplayMode = false
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
@@ -504,9 +626,14 @@ class TourGuideService : LifecycleService() {
         const val ACTION_PAUSE = "ACTION_PAUSE"
         const val ACTION_RESUME = "ACTION_RESUME"
         const val ACTION_SKIP = "ACTION_SKIP"
+        const val ACTION_REPLAY_POI = "ACTION_REPLAY_POI"
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val EXTRA_FAMOUS_MODE = "EXTRA_FAMOUS_MODE"
+        const val EXTRA_POI_OSM_ID = "EXTRA_POI_OSM_ID"
+        const val EXTRA_POI_NAME = "EXTRA_POI_NAME"
+        const val EXTRA_POI_LAT = "EXTRA_POI_LAT"
+        const val EXTRA_POI_LON = "EXTRA_POI_LON"
         const val CHANNEL_ID = "tour_guide_channel"
         const val NOTIFICATION_ID = 1001
         const val PREFS_NAME = "tour_prefs"

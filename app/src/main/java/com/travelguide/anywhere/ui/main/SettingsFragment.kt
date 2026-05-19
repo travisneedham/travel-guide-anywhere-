@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -14,6 +15,7 @@ import android.view.WindowManager
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -42,6 +44,7 @@ import com.travelguide.anywhere.service.PiperVoice
 import com.travelguide.anywhere.service.PiperVoices
 import com.travelguide.anywhere.service.TourAutoMediaService
 import com.travelguide.anywhere.service.TourGuideService
+import com.travelguide.anywhere.service.TourState
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
@@ -49,7 +52,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.travelguide.anywhere.experiment.TtsExperiment
 import com.travelguide.anywhere.service.KokoroTtsEngine
-import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -791,13 +793,57 @@ class SettingsFragment : Fragment() {
             return
         }
         val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+        val colorPrimary = requireContext().getColor(R.color.text_primary)
+        val colorSecondary = requireContext().getColor(R.color.text_secondary)
+        val colorRed = requireContext().getColor(R.color.stop_color)
+
         entries.forEachIndexed { index, entry ->
             val row = android.view.LayoutInflater.from(requireContext())
                 .inflate(R.layout.item_mentioned_place, container, false)
-            row.findViewById<android.widget.TextView>(R.id.tv_place_name).text = entry.name
-            row.findViewById<android.widget.TextView>(R.id.tv_place_time).text =
-                sdf.format(java.util.Date(entry.mentionedAt))
+
+            val tvName = row.findViewById<android.widget.TextView>(R.id.tv_place_name)
+            val tvSummary = row.findViewById<android.widget.TextView>(R.id.tv_place_summary)
+            val tvTime = row.findViewById<android.widget.TextView>(R.id.tv_place_time)
+            val btnThumbsDown = row.findViewById<android.widget.ImageButton>(R.id.btn_thumbs_down)
+
+            // Name with auto-skipped indicator
+            tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
+            tvName.setTextColor(if (entry.autoSkipped) colorSecondary else colorPrimary)
+
+            // Summary line
+            if (entry.summary.isNotBlank()) {
+                tvSummary.text = entry.summary
+                tvSummary.visibility = android.view.View.VISIBLE
+            }
+
+            tvTime.text = sdf.format(java.util.Date(entry.mentionedAt))
+
+            // Thumbs down — not shown for auto-skipped items
+            if (!entry.autoSkipped) {
+                btnThumbsDown.visibility = android.view.View.VISIBLE
+                applyThumbsDownState(btnThumbsDown, entry.thumbsDown, colorSecondary, colorRed)
+                btnThumbsDown.setOnClickListener {
+                    mentionedPlacesStore.markThumbsDown(entry.osmId)
+                    populatePlacesList()
+                }
+            }
+
+            // Tap to replay (not for auto-skipped)
+            if (!entry.autoSkipped) {
+                row.isClickable = true
+                row.isFocusable = true
+                row.foreground = requireContext().getDrawable(
+                    android.R.attr.selectableItemBackground.let { attr ->
+                        val typedValue = android.util.TypedValue()
+                        requireContext().theme.resolveAttribute(attr, typedValue, true)
+                        typedValue.resourceId
+                    }
+                )
+                row.setOnClickListener { showReplayDialog(entry) }
+            }
+
             container.addView(row)
+
             if (index < entries.lastIndex) {
                 val divider = android.view.View(requireContext()).apply {
                     layoutParams = android.view.ViewGroup.LayoutParams(
@@ -808,6 +854,56 @@ class SettingsFragment : Fragment() {
                 container.addView(divider)
             }
         }
+    }
+
+    private fun applyThumbsDownState(
+        btn: android.widget.ImageButton,
+        active: Boolean,
+        inactiveColor: Int,
+        activeColor: Int,
+    ) {
+        btn.imageTintList = android.content.res.ColorStateList.valueOf(
+            if (active) activeColor else inactiveColor
+        )
+        btn.alpha = if (active) 1f else 0.5f
+    }
+
+    private fun showReplayDialog(entry: MentionedPlacesStore.Entry) {
+        val ctx = requireContext()
+        if (TourGuideService.tourState.value != TourState.IDLE) {
+            Toast.makeText(ctx, "Stop the tour first to replay a place", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val apiKey = prefs.getString(MainFragment.PREF_API_KEY, "") ?: ""
+        if (apiKey.isBlank()) {
+            Toast.makeText(ctx, "API key not configured — go to the API Key section", Toast.LENGTH_LONG).show()
+            return
+        }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle(entry.name)
+            .setMessage(
+                buildString {
+                    if (entry.summary.isNotBlank()) {
+                        appendLine(entry.summary)
+                        appendLine()
+                    }
+                    append("Hear about this place again?")
+                }
+            )
+            .setPositiveButton("Replay") { _, _ ->
+                val intent = Intent(ctx, TourGuideService::class.java).apply {
+                    action = TourGuideService.ACTION_REPLAY_POI
+                    putExtra(TourGuideService.EXTRA_POI_OSM_ID, entry.osmId)
+                    putExtra(TourGuideService.EXTRA_POI_NAME, entry.name)
+                    putExtra(TourGuideService.EXTRA_POI_LAT, entry.lat)
+                    putExtra(TourGuideService.EXTRA_POI_LON, entry.lon)
+                    putExtra(TourGuideService.EXTRA_API_KEY, apiKey)
+                }
+                ctx.startForegroundService(intent)
+                Toast.makeText(ctx, "Generating narration for ${entry.name}…", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun saveSettings() {
