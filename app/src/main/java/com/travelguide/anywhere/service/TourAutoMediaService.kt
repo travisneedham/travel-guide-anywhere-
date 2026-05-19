@@ -349,14 +349,15 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
             )
         }
 
-        private fun send(action: String) {
-            Log.d(TAG, "send → TourGuideService action=$action")
-            startService(
-                Intent(this@TourAutoMediaService, TourGuideService::class.java).apply {
-                    this.action = action
-                }
-            )
-        }
+    }
+
+    private fun send(action: String) {
+        Log.d(TAG, "send → TourGuideService action=$action")
+        startService(
+            Intent(this, TourGuideService::class.java).apply {
+                this.action = action
+            }
+        )
     }
 
     private fun focusChangeName(focusChange: Int) = when (focusChange) {
