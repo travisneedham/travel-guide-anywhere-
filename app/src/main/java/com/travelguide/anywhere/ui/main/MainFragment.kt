@@ -7,6 +7,7 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
@@ -58,6 +59,7 @@ class MainFragment : Fragment() {
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
+    @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -241,6 +243,7 @@ class MainFragment : Fragment() {
             }
         }
         binding.ivPoiImage.setOnClickListener { showFullScreenImage() }
+        binding.tvSeeAllPlaces.setOnClickListener { showAllPlacesDialog() }
     }
 
     // ── Route card ─────────────────────────────────────────────────────────────
@@ -475,10 +478,10 @@ class MainFragment : Fragment() {
     private fun updateMentionedList(entries: List<MentionedPlacesStore.Entry>) {
         binding.llMentionedPlaces.removeAllViews()
         if (entries.isEmpty()) {
-            binding.tvMentionedLabel.visibility = View.GONE
+            binding.layoutMentionedHeader.visibility = View.GONE
             return
         }
-        binding.tvMentionedLabel.visibility = View.VISIBLE
+        binding.layoutMentionedHeader.visibility = View.VISIBLE
         val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
         entries.forEachIndexed { index, entry ->
             val row = LayoutInflater.from(requireContext())
@@ -514,6 +517,41 @@ class MainFragment : Fragment() {
                 }
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showAllPlacesDialog() {
+        val entries = mentionedPlacesStore.allSorted()
+        if (entries.isEmpty()) return
+        val ctx = requireContext()
+        val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+
+        val list = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val hPad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(hPad, 0, hPad, 0)
+        }
+        entries.forEachIndexed { index, entry ->
+            val row = LayoutInflater.from(ctx)
+                .inflate(R.layout.item_mentioned_place, list, false)
+            row.findViewById<TextView>(R.id.tv_place_name).text = entry.name
+            row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
+            list.addView(row)
+            if (index < entries.lastIndex) {
+                val divider = View(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                    setBackgroundColor(ctx.getColor(R.color.stroke))
+                }
+                list.addView(divider)
+            }
+        }
+
+        val scroll = android.widget.ScrollView(ctx).apply { addView(list) }
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("All Places Covered (${entries.size})")
+            .setView(scroll)
+            .setPositiveButton("Done", null)
             .show()
     }
 

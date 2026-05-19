@@ -61,6 +61,8 @@ class MentionedPlacesStore @Inject constructor(
 
     fun recentFive(): List<Entry> = _entries.sortedByDescending { it.mentionedAt }.take(5)
 
+    fun allSorted(): List<Entry> = _entries.sortedByDescending { it.mentionedAt }
+
     fun isNameMentioned(name: String): Boolean = sessionNames.any { mentioned ->
         name.contains(mentioned, ignoreCase = true) ||
         mentioned.contains(name, ignoreCase = true)

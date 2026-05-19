@@ -28,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
+import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.databinding.FragmentSettingsBinding
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
@@ -67,6 +68,7 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
     @Inject lateinit var piperModelManager: PiperModelManager
+    @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -104,6 +106,7 @@ class SettingsFragment : Fragment() {
         loadPrompts()
         setupDiagnostics()
         setupExperiment()
+        populatePlacesList()
     }
 
     private fun setupToolbar() {
@@ -575,6 +578,7 @@ class SettingsFragment : Fragment() {
                 )
                 .setPositiveButton("Clear") { _, _ ->
                     viewModel.clearHistory()
+                    populatePlacesList()
                     Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton("Cancel", null)
@@ -687,6 +691,40 @@ class SettingsFragment : Fragment() {
                     }
                     .setNegativeButton("Done", null)
                     .show()
+            }
+        }
+    }
+
+    private fun populatePlacesList() {
+        val container = binding.llAllPlaces
+        container.removeAllViews()
+        val entries = mentionedPlacesStore.allSorted()
+        if (entries.isEmpty()) {
+            val empty = android.widget.TextView(requireContext()).apply {
+                text = "No places covered yet."
+                textSize = 13f
+                setTextColor(requireContext().getColor(R.color.text_secondary))
+                setPadding(0, 4, 0, 4)
+            }
+            container.addView(empty)
+            return
+        }
+        val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+        entries.forEachIndexed { index, entry ->
+            val row = android.view.LayoutInflater.from(requireContext())
+                .inflate(R.layout.item_mentioned_place, container, false)
+            row.findViewById<android.widget.TextView>(R.id.tv_place_name).text = entry.name
+            row.findViewById<android.widget.TextView>(R.id.tv_place_time).text =
+                sdf.format(java.util.Date(entry.mentionedAt))
+            container.addView(row)
+            if (index < entries.lastIndex) {
+                val divider = android.view.View(requireContext()).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1
+                    )
+                    setBackgroundColor(requireContext().getColor(R.color.stroke))
+                }
+                container.addView(divider)
             }
         }
     }

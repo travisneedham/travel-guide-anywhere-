@@ -54,7 +54,7 @@
                 android:contentDescription="@string/settings_title" />
         </LinearLayout>
 
-        <!-- Mode toggle: Nearby / Famous / Route -->
+        <!-- Mode toggle: Nearby / Famous / Trip -->
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/toggle_mode"
             android:layout_width="match_parent"
@@ -69,6 +69,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:textSize="12sp"
                 android:text="@string/mode_nearby" />
 
             <com.google.android.material.button.MaterialButton
@@ -77,6 +78,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:textSize="12sp"
                 android:text="@string/mode_famous" />
 
             <com.google.android.material.button.MaterialButton
@@ -85,6 +87,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:textSize="12sp"
                 android:text="@string/mode_route" />
         </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -315,18 +318,40 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Recently mentioned places -->
-        <TextView
-            android:id="@+id/tv_mentioned_label"
+        <!-- Recently mentioned places header + "See all" link -->
+        <LinearLayout
+            android:id="@+id/layout_mentioned_header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/covered_places"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:textAllCaps="true"
-            android:letterSpacing="0.1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:visibility="gone"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/tv_mentioned_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/covered_places"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/tv_see_all_places"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="See all"
+                android:textColor="@color/accent"
+                android:textSize="12sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="0dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/ll_mentioned_places"
