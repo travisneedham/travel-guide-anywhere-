@@ -2,6 +2,8 @@ package com.travelguide.anywhere.ui.main
 
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +27,8 @@ import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.io.File
@@ -43,8 +47,10 @@ class MainFragment : Fragment() {
 
     private var sliderInSpeedMode = false
     private var isFamousMode = false
+    private var isRouteMode = false
     private var tourIsActive = false
     private var blockModeChange = false
+    private var urlDebounceJob: Job? = null
 
     // Separate saved values per mode so switching back restores the last-used radius.
     private var savedNearbySliderValue = 4f   // 1 mile
@@ -65,12 +71,14 @@ class MainFragment : Fragment() {
 
         // Restore mode and saved radii before setting up slider.
         isFamousMode = prefs.getBoolean(PREF_FAMOUS_MODE, false)
+        isRouteMode = prefs.getBoolean(PREF_ROUTE_MODE, false)
         savedNearbySliderValue = prefs.getFloat(PREF_NEARBY_RADIUS, 4f)
         savedFamousSliderValue = prefs.getFloat(PREF_FAMOUS_RADIUS, 25f)
 
         setupModeToggle()
         setupSlider()
         setupButtons()
+        setupRouteCard()
         observeState()
         checkKokoroOnStartup()
     }
@@ -79,33 +87,50 @@ class MainFragment : Fragment() {
 
     private fun setupModeToggle() {
         // Set initial checked state without triggering the listener.
-        if (isFamousMode) binding.toggleMode.check(R.id.btn_mode_famous)
-        else binding.toggleMode.check(R.id.btn_mode_nearby)
+        when {
+            isRouteMode -> binding.toggleMode.check(R.id.btn_mode_route)
+            isFamousMode -> binding.toggleMode.check(R.id.btn_mode_famous)
+            else -> binding.toggleMode.check(R.id.btn_mode_nearby)
+        }
+        binding.cardRoute.visibility = if (isRouteMode) View.VISIBLE else View.GONE
 
         binding.toggleMode.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
             if (blockModeChange) return@addOnButtonCheckedListener
             if (tourIsActive) {
                 blockModeChange = true
-                group.check(if (isFamousMode) R.id.btn_mode_famous else R.id.btn_mode_nearby)
+                group.check(when {
+                    isRouteMode -> R.id.btn_mode_route
+                    isFamousMode -> R.id.btn_mode_famous
+                    else -> R.id.btn_mode_nearby
+                })
                 blockModeChange = false
                 return@addOnButtonCheckedListener
             }
-            val newFamous = checkedId == R.id.btn_mode_famous
-            if (newFamous == isFamousMode) return@addOnButtonCheckedListener
 
-            // Save current radius value for the mode we're leaving.
+            val newRoute = checkedId == R.id.btn_mode_route
+            val newFamous = checkedId == R.id.btn_mode_famous
+            if (newRoute == isRouteMode && newFamous == isFamousMode) return@addOnButtonCheckedListener
+
+            // Save current radius before switching.
             if (!sliderInSpeedMode) {
                 if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
                 else savedNearbySliderValue = binding.rangeSlider.value
             }
 
+            val wasRouteMode = isRouteMode
             isFamousMode = newFamous
+            isRouteMode = newRoute
+            if (wasRouteMode && !newRoute) viewModel.resetRoute()
+
             prefs.edit()
                 .putBoolean(PREF_FAMOUS_MODE, isFamousMode)
+                .putBoolean(PREF_ROUTE_MODE, isRouteMode)
                 .putFloat(PREF_NEARBY_RADIUS, savedNearbySliderValue)
                 .putFloat(PREF_FAMOUS_RADIUS, savedFamousSliderValue)
                 .apply()
+
+            binding.cardRoute.visibility = if (isRouteMode) View.VISIBLE else View.GONE
 
             if (!sliderInSpeedMode) applyModeSliderConfig()
         }
@@ -191,8 +216,20 @@ class MainFragment : Fragment() {
                 showApiKeyDialog()
                 return@setOnClickListener
             }
-            val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
-            viewModel.startTour(miles, apiKey, isFamousMode)
+            if (isRouteMode) {
+                val routeState = viewModel.routeParseState.value
+                if (routeState !is MainViewModel.RouteParseState.Ready) {
+                    Toast.makeText(requireContext(),
+                        "Paste a valid Google Maps directions link first",
+                        Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val miles = binding.rangeSlider.value / 4f
+                viewModel.startRouteTour(miles, apiKey)
+            } else {
+                val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
+                viewModel.startTour(miles, apiKey, isFamousMode)
+            }
         }
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
         binding.btnPause.setOnClickListener { viewModel.pauseOrResume() }
@@ -204,6 +241,44 @@ class MainFragment : Fragment() {
             }
         }
         binding.ivPoiImage.setOnClickListener { showFullScreenImage() }
+    }
+
+    // ── Route card ─────────────────────────────────────────────────────────────
+
+    private fun setupRouteCard() {
+        binding.etRouteUrl.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                urlDebounceJob?.cancel()
+                urlDebounceJob = viewLifecycleOwner.lifecycleScope.launch {
+                    delay(800L)
+                    viewModel.parseRoute(s?.toString()?.trim() ?: "")
+                }
+            }
+        })
+    }
+
+    private fun updateRouteStatus(state: MainViewModel.RouteParseState) {
+        val tv = binding.tvRouteStatus
+        when (state) {
+            is MainViewModel.RouteParseState.Idle -> tv.visibility = View.GONE
+            is MainViewModel.RouteParseState.Loading -> {
+                tv.visibility = View.VISIBLE
+                tv.setTextColor(requireContext().getColor(R.color.text_secondary))
+                tv.text = "Parsing route…"
+            }
+            is MainViewModel.RouteParseState.Ready -> {
+                tv.visibility = View.VISIBLE
+                tv.setTextColor(requireContext().getColor(R.color.accent))
+                tv.text = "Route ready: ${state.route.summaryText}"
+            }
+            is MainViewModel.RouteParseState.Error -> {
+                tv.visibility = View.VISIBLE
+                tv.setTextColor(0xFFFF5252.toInt())
+                tv.text = state.message
+            }
+        }
     }
 
     // ── Kokoro startup ─────────────────────────────────────────────────────────
@@ -299,6 +374,7 @@ class MainFragment : Fragment() {
                         binding.tvImageCredit.visibility = View.GONE
                     }
                 }}
+                launch { viewModel.routeParseState.collect { updateRouteStatus(it) } }
                 launch {
                     kokoroModelManager.state.collect { state ->
                         if (state is KokoroModelManager.DownloadState.Ready) {
@@ -327,6 +403,11 @@ class MainFragment : Fragment() {
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
         tourIsActive = isActive
         binding.toggleMode.alpha = if (isActive) 0.78f else 1.0f
+        binding.cardRoute.visibility = when {
+            isRouteMode && !isActive -> View.VISIBLE
+            isRouteMode && isActive -> View.GONE  // hide during active tour to save space
+            else -> View.GONE
+        }
         if (isActive) switchSliderToSpeedMode() else switchSliderToRangeMode()
 
         val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
@@ -343,8 +424,11 @@ class MainFragment : Fragment() {
         binding.tvStatus.text = when (state) {
             TourState.IDLE -> ""
             TourState.LOCATING -> getString(R.string.status_locating)
-            TourState.FETCHING -> if (isFamousMode) "Finding famous landmarks…"
-                                  else getString(R.string.status_fetching)
+            TourState.FETCHING -> when {
+                isFamousMode -> "Finding famous landmarks…"
+                isRouteMode -> "Finding places along route…"
+                else -> getString(R.string.status_fetching)
+            }
             TourState.GENERATING -> getString(R.string.status_generating)
             TourState.LOADING_AUDIO -> getString(R.string.status_loading_audio)
             TourState.SPEAKING -> {
@@ -486,6 +570,7 @@ class MainFragment : Fragment() {
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
         const val DEFAULT_KOKORO_VOICE_SID = 17 // Onyx (American Male)
         const val PREF_FAMOUS_MODE = "pref_famous_mode"
+        const val PREF_ROUTE_MODE = "pref_route_mode"
         const val PREF_NEARBY_RADIUS = "pref_nearby_radius"
         const val PREF_FAMOUS_RADIUS = "pref_famous_radius"
         private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"

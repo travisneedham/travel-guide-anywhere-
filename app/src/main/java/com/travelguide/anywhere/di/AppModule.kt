@@ -3,6 +3,8 @@ package com.travelguide.anywhere.di
 import android.content.Context
 import com.google.gson.Gson
 import com.travelguide.anywhere.data.remote.ClaudeApiService
+import com.travelguide.anywhere.data.remote.NominatimService
+import com.travelguide.anywhere.data.remote.OsrmService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import dagger.Module
@@ -61,6 +63,26 @@ object AppModule {
     @Singleton
     fun provideClaudeApiService(retrofit: Retrofit): ClaudeApiService =
         retrofit.create(ClaudeApiService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideOsrmService(client: OkHttpClient, gson: Gson): OsrmService =
+        Retrofit.Builder()
+            .baseUrl(OsrmService.BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+            .create(OsrmService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideNominatimService(client: OkHttpClient, gson: Gson): NominatimService =
+        Retrofit.Builder()
+            .baseUrl(NominatimService.BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+            .create(NominatimService::class.java)
 
     @Provides
     @Singleton

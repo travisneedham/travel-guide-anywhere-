@@ -22,6 +22,7 @@ import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
+import com.travelguide.anywhere.data.model.RouteData
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiImageRepository
 import com.travelguide.anywhere.repository.PoiRepository
@@ -54,6 +55,8 @@ class TourGuideService : LifecycleService() {
     private var generationJob: Job? = null
     private var prefetchJob: Job? = null
     private var imageFetchJob: Job? = null
+    private var routeSimulator: RouteSimulator? = null
+    private var routeAdvanceJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
     private var savedTopicName = ""
@@ -91,7 +94,8 @@ class TourGuideService : LifecycleService() {
                     .putBoolean(PREF_FAMOUS_MODE, famousMode)
                     .apply()
                 startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
-                requestLocationUpdates()
+                val route = pendingRoute.also { pendingRoute = null }
+                if (route != null) startRouteSimulation(route) else requestLocationUpdates()
                 emitState(TourState.LOCATING)
                 mentionedPlaces.value = mentionedPlacesStore.recentFive()
             }
@@ -103,6 +107,26 @@ class TourGuideService : LifecycleService() {
         }
 
         return START_STICKY
+    }
+
+    private fun startRouteSimulation(route: RouteData) {
+        val sim = RouteSimulator(route)
+        routeSimulator = sim
+        routeAdvanceJob = lifecycleScope.launch {
+            val firstLoc = sim.currentLocation()
+            lastLocation = firstLoc
+            onLocationUpdate(firstLoc)
+            while (!sim.isAtEnd) {
+                delay(30_000L)
+                if (!sim.isPaused) sim.advance(30.0)
+                val loc = sim.currentLocation()
+                lastLocation = loc
+                if (!isSpeaking && !isGenerating && tourState.value != TourState.PAUSED) {
+                    onLocationUpdate(loc)
+                }
+            }
+            Log.d(TAG, "Route simulation complete — holding at final position")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -292,6 +316,7 @@ class TourGuideService : LifecycleService() {
     private fun pauseTour() {
         if (!isSpeaking) return
         ttsEngine?.pause()
+        routeSimulator?.pause()
         isSpeaking = false
         emitState(TourState.PAUSED)
         updateNotification("Paused — $savedTopicName")
@@ -300,6 +325,7 @@ class TourGuideService : LifecycleService() {
     private fun resumeTour() {
         if (tourState.value != TourState.PAUSED) return
         val engine = ttsEngine ?: return
+        routeSimulator?.resume()
         if (!engine.canResume) {
             lastLocation?.let { startGenerationCycle(it) }
             return
@@ -361,6 +387,9 @@ class TourGuideService : LifecycleService() {
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
+        routeAdvanceJob?.cancel(); routeAdvanceJob = null
+        routeSimulator = null
+        pendingRoute = null
         prefetchedNarration = null
         prefetchedNarrationCommit = null
         fusedLocation.removeLocationUpdates(locationCallback)
@@ -468,6 +497,8 @@ class TourGuideService : LifecycleService() {
         const val PREF_LAST_RADIUS = "pref_last_radius"
         const val PREF_FAMOUS_MODE = "pref_famous_mode"
         private const val TAG = "TourGuideService"
+
+        @Volatile var pendingRoute: RouteData? = null
 
         val tourState = MutableStateFlow(TourState.IDLE)
         val currentTopic = MutableStateFlow("")

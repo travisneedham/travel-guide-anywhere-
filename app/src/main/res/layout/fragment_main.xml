@@ -54,7 +54,7 @@
                 android:contentDescription="@string/settings_title" />
         </LinearLayout>
 
-        <!-- Mode toggle: Nearby (distance-first) vs Famous (fame-first) -->
+        <!-- Mode toggle: Nearby / Famous / Route -->
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/toggle_mode"
             android:layout_width="match_parent"
@@ -78,7 +78,63 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="@string/mode_famous" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_mode_route"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/mode_route" />
         </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <!-- Route URL card (visible only in Route mode) -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_route"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/stroke"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_route_url"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Paste Google Maps directions link">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_route_url"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textUri"
+                        android:maxLines="2"
+                        android:imeOptions="actionDone" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <TextView
+                    android:id="@+id/tv_route_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textSize="13sp"
+                    android:visibility="gone"
+                    tools:text="Route ready: 5.2 mi, ~12m"
+                    tools:visibility="visible" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <!-- Range card -->
         <com.google.android.material.card.MaterialCardView
