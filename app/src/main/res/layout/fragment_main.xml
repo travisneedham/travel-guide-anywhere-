@@ -314,7 +314,6 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:src="@drawable/ic_navigate"
-                        android:imageTintList="@color/text_secondary"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="Open in Maps"
                         android:padding="8dp" />
@@ -324,7 +323,6 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:src="@drawable/ic_language"
-                        android:imageTintList="@color/text_secondary"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="Open Wikipedia article"
                         android:padding="8dp"
@@ -341,7 +339,6 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:src="@drawable/ic_favorite_border"
-                        android:imageTintList="@color/text_secondary"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="Want to Visit"
                         android:padding="8dp" />
@@ -351,7 +348,6 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:src="@drawable/ic_thumb_down"
-                        android:imageTintList="@color/text_secondary"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="Not interested"
                         android:padding="8dp"

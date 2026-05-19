@@ -118,15 +118,18 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
             tvTime.text = sdf.format(Date(entry.mentionedAt))
 
             // Saved indicator in name row
+            ivSaved.imageTintList = android.content.res.ColorStateList.valueOf(colorAccent)
             ivSaved.visibility = if (entry.wantToVisit) View.VISIBLE else View.GONE
 
             // Show action row
             layoutActions.visibility = View.VISIBLE
 
             // Navigate
+            btnNavigate.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
             btnNavigate.setOnClickListener { openNavigation(entry.lat, entry.lon, entry.name) }
 
             // Wikipedia
+            btnWikipedia.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
             if (entry.wikipediaUrl != null) {
                 btnWikipedia.visibility = View.VISIBLE
                 btnWikipedia.setOnClickListener { openUrl(entry.wikipediaUrl) }

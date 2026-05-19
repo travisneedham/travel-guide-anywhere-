@@ -476,6 +476,13 @@ class MainFragment : Fragment() {
     }
 
     private fun setupNowPlayingActions() {
+        val secondary = android.content.res.ColorStateList.valueOf(requireContext().getColor(R.color.text_secondary))
+        binding.btnPoiNavigate.imageTintList = secondary
+        binding.btnPoiWikipedia.imageTintList = secondary
+        binding.btnPoiWantToVisit.imageTintList = secondary
+        binding.btnPoiThumbsDown.imageTintList = secondary
+        binding.btnPoiThumbsDown.alpha = 0.5f
+
         binding.btnPoiNavigate.setOnClickListener {
             val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
             val uri = android.net.Uri.parse("geo:${poi.lat},${poi.lon}?q=${android.net.Uri.encode(poi.name)}")
