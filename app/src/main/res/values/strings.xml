@@ -21,9 +21,12 @@
     <string name="covered_places">Places covered</string>
     <string name="idle_hint">Set a range and hit Start Tour to begin your audio adventure.</string>
     <string name="settings_title">Settings</string>
+    <string name="mode_live">Live</string>
     <string name="mode_nearby">Nearby</string>
     <string name="mode_famous">Famous</string>
     <string name="mode_route">Trip</string>
+    <string name="mode_sort_closest">Closest First</string>
+    <string name="mode_sort_famous">Most Famous First</string>
     <string name="photo_credit">Photo: Wikipedia</string>
     <string name="status_no_new_pois_famous">No famous places found — try a wider range</string>
 </resources>

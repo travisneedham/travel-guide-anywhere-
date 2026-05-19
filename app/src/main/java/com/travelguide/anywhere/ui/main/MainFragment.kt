@@ -37,8 +37,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
-import kotlin.math.roundToInt
-
 @AndroidEntryPoint
 class MainFragment : Fragment() {
 
@@ -47,15 +45,12 @@ class MainFragment : Fragment() {
     private val viewModel: MainViewModel by viewModels()
 
     private var sliderInSpeedMode = false
-    private var isFamousMode = false
-    private var isRouteMode = false
+    private var isTripMode = false
+    private var isFamousFirst = false
     private var tourIsActive = false
     private var blockModeChange = false
     private var urlDebounceJob: Job? = null
-
-    // Separate saved values per mode so switching back restores the last-used radius.
-    private var savedNearbySliderValue = 4f   // 1 mile
-    private var savedFamousSliderValue = 25f  // 25 miles
+    private var savedRadiusIndex = DEFAULT_RADIUS_INDEX
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
@@ -71,13 +66,13 @@ class MainFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Restore mode and saved radii before setting up slider.
-        isFamousMode = prefs.getBoolean(PREF_FAMOUS_MODE, false)
-        isRouteMode = prefs.getBoolean(PREF_ROUTE_MODE, false)
-        savedNearbySliderValue = prefs.getFloat(PREF_NEARBY_RADIUS, 4f)
-        savedFamousSliderValue = prefs.getFloat(PREF_FAMOUS_RADIUS, 25f)
+        // Restore mode and sort preferences before setting up slider.
+        isTripMode = prefs.getBoolean(PREF_TRIP_MODE, false)
+        isFamousFirst = prefs.getBoolean(PREF_FAMOUS_SORT, false)
+        savedRadiusIndex = prefs.getInt(PREF_RADIUS_INDEX, DEFAULT_RADIUS_INDEX)
 
         setupModeToggle()
+        setupSortToggle()
         setupSlider()
         setupButtons()
         setupRouteCard()
@@ -88,53 +83,42 @@ class MainFragment : Fragment() {
     // ── Mode toggle ────────────────────────────────────────────────────────────
 
     private fun setupModeToggle() {
-        // Set initial checked state without triggering the listener.
-        when {
-            isRouteMode -> binding.toggleMode.check(R.id.btn_mode_route)
-            isFamousMode -> binding.toggleMode.check(R.id.btn_mode_famous)
-            else -> binding.toggleMode.check(R.id.btn_mode_nearby)
-        }
-        binding.cardRoute.visibility = if (isRouteMode) View.VISIBLE else View.GONE
+        binding.toggleMode.check(if (isTripMode) R.id.btn_mode_trip else R.id.btn_mode_live)
+        binding.cardRoute.visibility = if (isTripMode) View.VISIBLE else View.GONE
 
         binding.toggleMode.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
             if (blockModeChange) return@addOnButtonCheckedListener
             if (tourIsActive) {
                 blockModeChange = true
-                group.check(when {
-                    isRouteMode -> R.id.btn_mode_route
-                    isFamousMode -> R.id.btn_mode_famous
-                    else -> R.id.btn_mode_nearby
-                })
+                group.check(if (isTripMode) R.id.btn_mode_trip else R.id.btn_mode_live)
                 blockModeChange = false
                 return@addOnButtonCheckedListener
             }
+            val newTrip = checkedId == R.id.btn_mode_trip
+            if (newTrip == isTripMode) return@addOnButtonCheckedListener
+            val wasTrip = isTripMode
+            isTripMode = newTrip
+            if (wasTrip) viewModel.resetRoute()
+            prefs.edit().putBoolean(PREF_TRIP_MODE, isTripMode).apply()
+            binding.cardRoute.visibility = if (isTripMode) View.VISIBLE else View.GONE
+        }
+    }
 
-            val newRoute = checkedId == R.id.btn_mode_route
-            val newFamous = checkedId == R.id.btn_mode_famous
-            if (newRoute == isRouteMode && newFamous == isFamousMode) return@addOnButtonCheckedListener
+    private fun setupSortToggle() {
+        binding.toggleSort.check(if (isFamousFirst) R.id.btn_sort_famous else R.id.btn_sort_closest)
 
-            // Save current radius before switching.
-            if (!sliderInSpeedMode) {
-                if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
-                else savedNearbySliderValue = binding.rangeSlider.value
+        binding.toggleSort.addOnButtonCheckedListener { group, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            if (blockModeChange) return@addOnButtonCheckedListener
+            if (tourIsActive) {
+                blockModeChange = true
+                group.check(if (isFamousFirst) R.id.btn_sort_famous else R.id.btn_sort_closest)
+                blockModeChange = false
+                return@addOnButtonCheckedListener
             }
-
-            val wasRouteMode = isRouteMode
-            isFamousMode = newFamous
-            isRouteMode = newRoute
-            if (wasRouteMode && !newRoute) viewModel.resetRoute()
-
-            prefs.edit()
-                .putBoolean(PREF_FAMOUS_MODE, isFamousMode)
-                .putBoolean(PREF_ROUTE_MODE, isRouteMode)
-                .putFloat(PREF_NEARBY_RADIUS, savedNearbySliderValue)
-                .putFloat(PREF_FAMOUS_RADIUS, savedFamousSliderValue)
-                .apply()
-
-            binding.cardRoute.visibility = if (isRouteMode) View.VISIBLE else View.GONE
-
-            if (!sliderInSpeedMode) applyModeSliderConfig()
+            isFamousFirst = checkedId == R.id.btn_sort_famous
+            prefs.edit().putBoolean(PREF_FAMOUS_SORT, isFamousFirst).apply()
         }
     }
 
@@ -156,28 +140,18 @@ class MainFragment : Fragment() {
     }
 
     private fun applyModeSliderConfig() {
-        val targetValue = if (isFamousMode) savedFamousSliderValue else savedNearbySliderValue
         binding.rangeSlider.apply {
-            if (isFamousMode) {
-                valueFrom = 5f
-                valueTo = 100f
-                stepSize = 5f
-                value = ((targetValue / 5f).roundToInt() * 5f).coerceIn(5f, 100f)
-            } else {
-                valueFrom = 1f
-                valueTo = 40f
-                stepSize = 1f
-                value = targetValue.coerceIn(1f, 40f)
-            }
+            valueFrom = 0f
+            valueTo = (SLIDER_MILES.size - 1).toFloat()
+            stepSize = 1f
+            value = savedRadiusIndex.toFloat()
         }
-        updateRangeLabel(binding.rangeSlider.value)
+        updateRangeLabel(savedRadiusIndex.toFloat())
     }
 
     private fun switchSliderToSpeedMode() {
         if (sliderInSpeedMode) return
-        // Save range value for the current mode before taking over the slider.
-        if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
-        else savedNearbySliderValue = binding.rangeSlider.value
+        savedRadiusIndex = binding.rangeSlider.value.toInt()
         sliderInSpeedMode = true
         val rate = prefs.getFloat(PREF_SPEECH_RATE, 0.95f).coerceIn(0.5f, 1.5f)
         binding.rangeSlider.apply {
@@ -196,17 +170,22 @@ class MainFragment : Fragment() {
     }
 
     private fun updateRangeLabel(value: Float) {
-        val miles = if (isFamousMode) value else value / 4f
+        val miles = SLIDER_MILES.getOrElse(value.toInt()) { SLIDER_MILES[DEFAULT_RADIUS_INDEX] }
         val formatted = when {
-            miles < 1f   -> "%.2f".format(miles)
-            miles < 10f  -> "%.1f".format(miles)
-            else         -> "%.0f".format(miles)
+            miles < 1f  -> "%.2f".format(miles)
+            miles < 10f -> "%.1f".format(miles)
+            else        -> "%.0f".format(miles)
         }
         binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
     }
 
     private fun updateSpeedLabel(rate: Float) {
         binding.tvRangeLabel.text = getString(R.string.speed_label, "%.2f".format(rate))
+    }
+
+    private fun currentRadiusMiles(): Float {
+        val index = if (sliderInSpeedMode) savedRadiusIndex else binding.rangeSlider.value.toInt()
+        return SLIDER_MILES.getOrElse(index) { SLIDER_MILES[DEFAULT_RADIUS_INDEX] }
     }
 
     // ── Buttons ────────────────────────────────────────────────────────────────
@@ -218,7 +197,7 @@ class MainFragment : Fragment() {
                 showApiKeyDialog()
                 return@setOnClickListener
             }
-            if (isRouteMode) {
+            if (isTripMode) {
                 val routeState = viewModel.routeParseState.value
                 if (routeState !is MainViewModel.RouteParseState.Ready) {
                     Toast.makeText(requireContext(),
@@ -226,11 +205,9 @@ class MainFragment : Fragment() {
                         Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                val miles = binding.rangeSlider.value / 4f
-                viewModel.startRouteTour(miles, apiKey)
+                viewModel.startRouteTour(currentRadiusMiles(), apiKey)
             } else {
-                val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
-                viewModel.startTour(miles, apiKey, isFamousMode)
+                viewModel.startTour(currentRadiusMiles(), apiKey, isFamousFirst)
             }
         }
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
@@ -406,9 +383,10 @@ class MainFragment : Fragment() {
         binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
         tourIsActive = isActive
         binding.toggleMode.alpha = if (isActive) 0.78f else 1.0f
+        binding.toggleSort.alpha = if (isActive) 0.78f else 1.0f
         binding.cardRoute.visibility = when {
-            isRouteMode && !isActive -> View.VISIBLE
-            isRouteMode && isActive -> View.GONE  // hide during active tour to save space
+            isTripMode && !isActive -> View.VISIBLE
+            isTripMode && isActive -> View.GONE
             else -> View.GONE
         }
         if (isActive) switchSliderToSpeedMode() else switchSliderToRangeMode()
@@ -428,8 +406,8 @@ class MainFragment : Fragment() {
             TourState.IDLE -> ""
             TourState.LOCATING -> getString(R.string.status_locating)
             TourState.FETCHING -> when {
-                isFamousMode -> "Finding famous landmarks…"
-                isRouteMode -> "Finding places along route…"
+                isFamousFirst -> "Finding famous landmarks…"
+                isTripMode -> "Finding places along route…"
                 else -> getString(R.string.status_fetching)
             }
             TourState.GENERATING -> getString(R.string.status_generating)
@@ -454,7 +432,7 @@ class MainFragment : Fragment() {
                 else getString(R.string.status_speaking)
             }
             TourState.PAUSED -> getString(R.string.status_paused)
-            TourState.NO_NEW_POIS -> if (isFamousMode) getString(R.string.status_no_new_pois_famous)
+            TourState.NO_NEW_POIS -> if (isFamousFirst) getString(R.string.status_no_new_pois_famous)
                                      else getString(R.string.status_no_new_pois)
             TourState.ERROR -> getString(R.string.status_error)
         }
@@ -512,8 +490,7 @@ class MainFragment : Fragment() {
                 val key = input.text?.toString()?.trim() ?: ""
                 prefs.edit().putString(PREF_API_KEY, key).apply()
                 if (key.isNotBlank()) {
-                    val miles = if (isFamousMode) binding.rangeSlider.value else binding.rangeSlider.value / 4f
-                    viewModel.startTour(miles, key, isFamousMode)
+                    viewModel.startTour(currentRadiusMiles(), key, isFamousFirst)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -590,15 +567,8 @@ class MainFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // Persist slider values when leaving the fragment.
-        if (!sliderInSpeedMode) {
-            if (isFamousMode) savedFamousSliderValue = binding.rangeSlider.value
-            else savedNearbySliderValue = binding.rangeSlider.value
-        }
-        prefs.edit()
-            .putFloat(PREF_NEARBY_RADIUS, savedNearbySliderValue)
-            .putFloat(PREF_FAMOUS_RADIUS, savedFamousSliderValue)
-            .apply()
+        if (!sliderInSpeedMode) savedRadiusIndex = binding.rangeSlider.value.toInt()
+        prefs.edit().putInt(PREF_RADIUS_INDEX, savedRadiusIndex).apply()
         _binding = null
     }
 
@@ -607,11 +577,16 @@ class MainFragment : Fragment() {
         const val PREF_SPEECH_RATE = "pref_speech_rate"
         const val PREF_KOKORO_VOICE_SID = "pref_kokoro_voice_sid"
         const val DEFAULT_KOKORO_VOICE_SID = 17 // Onyx (American Male)
-        const val PREF_FAMOUS_MODE = "pref_famous_mode"
-        const val PREF_ROUTE_MODE = "pref_route_mode"
-        const val PREF_NEARBY_RADIUS = "pref_nearby_radius"
-        const val PREF_FAMOUS_RADIUS = "pref_famous_radius"
+        const val PREF_TRIP_MODE = "pref_route_mode"
+        const val PREF_FAMOUS_SORT = "pref_famous_mode"
+        const val PREF_RADIUS_INDEX = "pref_radius_index"
+        const val DEFAULT_RADIUS_INDEX = 7  // 5.0 miles
         private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
+
+        val SLIDER_MILES = floatArrayOf(
+            0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f,
+            10f, 20f, 30f, 40f, 50f, 60f, 70f, 80f, 90f, 100f
+        )
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52
         val KOKORO_VOICES = listOf(

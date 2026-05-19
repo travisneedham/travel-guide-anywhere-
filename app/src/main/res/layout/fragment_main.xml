@@ -54,7 +54,7 @@
                 android:contentDescription="@string/settings_title" />
         </LinearLayout>
 
-        <!-- Mode toggle: Nearby / Famous / Trip -->
+        <!-- Primary mode toggle: Live / Trip -->
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/toggle_mode"
             android:layout_width="match_parent"
@@ -64,33 +64,19 @@
             app:singleSelection="true">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_mode_nearby"
+                android:id="@+id/btn_mode_live"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
-                android:text="@string/mode_nearby" />
+                android:text="@string/mode_live" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_mode_famous"
+                android:id="@+id/btn_mode_trip"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
-                android:text="@string/mode_famous" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_mode_route"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
                 android:text="@string/mode_route" />
         </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -142,6 +128,36 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Sort toggle: Closest First / Most Famous First -->
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/toggle_sort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_sort_closest"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:text="@string/mode_sort_closest" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_sort_famous"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:text="@string/mode_sort_famous" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
         <!-- Range card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -172,10 +188,10 @@
                     android:id="@+id/range_slider"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:valueFrom="1"
-                    android:valueTo="40"
+                    android:valueFrom="0"
+                    android:valueTo="17"
                     android:stepSize="1"
-                    android:value="4"
+                    android:value="7"
                     app:labelBehavior="gone"
                     app:thumbColor="@color/accent"
                     app:trackColorActive="@color/accent"
