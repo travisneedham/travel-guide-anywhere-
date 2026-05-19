@@ -6,4 +6,4 @@ Never include GitHub URLs in responses. When code is pushed to a branch, just st
 
 ## Branch
 
-Always push directly to `main`. Never create feature branches. Increment `versionCode` and `versionName` in `app/build.gradle.kts` with every push so the user can verify the build in Android Studio.
+Always push directly to `main`. Never create feature branches. Increment `versionCode` and `versionName` in `app/build.gradle.kts` with every push — including bug fix and build error commits — so the user can verify the build in Android Studio.
