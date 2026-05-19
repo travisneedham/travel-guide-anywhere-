@@ -93,7 +93,7 @@ class TourGuideService : LifecycleService() {
                     .putFloat(PREF_LAST_RADIUS, radiusMiles)
                     .putBoolean(PREF_FAMOUS_MODE, famousMode)
                     .apply()
-                startForeground(NOTIFICATION_ID, buildNotification("Starting tour..."))
+                startForeground(NOTIFICATION_ID, buildNotification("Starting tour...", true))
                 val route = pendingRoute.also { pendingRoute = null }
                 if (route != null) startRouteSimulation(route) else requestLocationUpdates()
                 emitState(TourState.LOCATING)
@@ -154,7 +154,7 @@ class TourGuideService : LifecycleService() {
                 emitState(TourState.FETCHING)
                 val fetchMsg = if (famousMode) "Finding famous landmarks nearby..."
                                else "Finding interesting places nearby..."
-                updateNotification(fetchMsg)
+                updateNotification(fetchMsg, true)
 
                 val allPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
                 val pois = allPois.filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
@@ -163,13 +163,13 @@ class TourGuideService : LifecycleService() {
                 if (pois.isEmpty()) {
                     Log.d(TAG, "No new POIs — emitting NO_NEW_POIS (all mentioned: ${allPois.size > 0})")
                     emitState(TourState.NO_NEW_POIS)
-                    updateNotification("Exploring... waiting for new places")
+                    updateNotification("Exploring... waiting for new places", true)
                     isGenerating = false
                     return@launch
                 }
 
                 emitState(TourState.GENERATING)
-                updateNotification("Writing your tour narration...")
+                updateNotification("Writing your tour narration...", true)
 
                 val poi = pois.first()
                 mentionedPlacesStore.sessionNames.add(poi.name)
@@ -197,7 +197,7 @@ class TourGuideService : LifecycleService() {
                 Log.e(TAG, "Error in generation cycle", e)
                 isGenerating = false
                 emitError(e.message ?: "Unknown error")
-                updateNotification("Error — retrying shortly...")
+                updateNotification("Error — retrying shortly...", true)
                 delay(15_000L)
                 generationJob = null
                 lastLocation?.let { startGenerationCycle(it) }
@@ -242,7 +242,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = true
         emitState(TourState.LOADING_AUDIO)
         emitCurrentTopic(topicName)
-        updateNotification("Loading audio: $topicName")
+        updateNotification("Loading audio: $topicName", true)
 
         val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
         loadingProgress.value = -1f  // reset to indeterminate at the start of each load
@@ -291,6 +291,9 @@ class TourGuideService : LifecycleService() {
                                 try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
                             )
                         }
+                        isGenerating = true   // block location-triggered cycles during the gap
+                        delay(3_000L)
+                        isGenerating = false
                         speak(nextNarration, nextPoi.name)
                     } else {
                         lastLocation?.let { onLocationUpdate(it) }
@@ -447,7 +450,7 @@ class TourGuideService : LifecycleService() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String, showProgress: Boolean = false): Notification {
         val tapIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
@@ -457,13 +460,14 @@ class TourGuideService : LifecycleService() {
             .setSmallIcon(R.drawable.ic_tour_guide)
             .setContentIntent(tapIntent)
             .setOngoing(true)
+            .setProgress(0, 0, showProgress)
             .build()
     }
 
-    private fun updateNotification(text: String) {
+    private fun updateNotification(text: String, showProgress: Boolean = false) {
         try {
             getSystemService(NotificationManager::class.java)
-                .notify(NOTIFICATION_ID, buildNotification(text))
+                .notify(NOTIFICATION_ID, buildNotification(text, showProgress))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to update notification: ${e.message}")
         }
