@@ -206,23 +206,38 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun prefetchNextNarration(location: Location) {
-        if (prefetchJob?.isActive == true) return
+        if (prefetchJob?.isActive == true) {
+            Log.d(TAG, "PREFETCH: already running — skipping duplicate call")
+            return
+        }
+        Log.d(TAG, "PREFETCH: starting")
+        val prefetchStart = System.currentTimeMillis()
         prefetchJob = lifecycleScope.launch {
             try {
+                val t0 = System.currentTimeMillis()
                 val pois = poiRepository.fetchPois(location, radiusMiles, famousMode)
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
-                if (pois.isEmpty()) return@launch
+                Log.d(TAG, "PREFETCH: POI fetch done in ${System.currentTimeMillis() - t0}ms — ${pois.size} unmentioned")
+                if (pois.isEmpty()) {
+                    Log.d(TAG, "PREFETCH: no unmentioned POIs — aborting")
+                    return@launch
+                }
                 val poi = pois.first()
+                Log.d(TAG, "PREFETCH: generating narration for '${poi.name}'")
+                val t1 = System.currentTimeMillis()
                 val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                Log.d(TAG, "PREFETCH: Claude generation done in ${System.currentTimeMillis() - t1}ms")
                 prefetchedNarration = poi to result.text
                 prefetchedNarrationCommit = result.commitHistory
-                Log.d(TAG, "Prefetched next narration: ${poi.name} — starting audio pre-generation")
+                Log.i(TAG, "PREFETCH: STORED '${poi.name}' — total ${System.currentTimeMillis() - prefetchStart}ms")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
                 ttsEngine?.prewarm(result.text, speechRate)
+                Log.d(TAG, "PREFETCH: prewarm complete for '${poi.name}'")
             } catch (e: CancellationException) {
+                Log.d(TAG, "PREFETCH: job cancelled — prefetchedNarration=${if (prefetchedNarration != null) "STORED" else "null"}")
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Prefetch failed — will use normal cycle: ${e.message}")
+                Log.w(TAG, "PREFETCH: failed — ${e.message}")
             }
         }
     }
@@ -254,6 +269,7 @@ class TourGuideService : LifecycleService() {
                 loadingProgress.value = -1f  // clear progress once playback actually begins
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
+                Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
                 lastLocation?.let { prefetchNextNarration(it) }
             },
             onEnqueued = {},
@@ -263,6 +279,7 @@ class TourGuideService : LifecycleService() {
                 val commit = currentNarrationCommit.also { currentNarrationCommit = null }
                 currentNarrationPoi = null
                 isSpeaking = false
+                Log.i(TAG, "TTS onDone '${poi?.name}' — played ${duration}ms, prefetchReady=${prefetchedNarration != null}, prefetchJobActive=${prefetchJob?.isActive}")
                 lifecycleScope.launch {
                     emitCurrentTopic("")
                     if (poi != null && duration >= 10_000L) {
@@ -279,6 +296,7 @@ class TourGuideService : LifecycleService() {
                     val nextNarration = prefetched?.second
                     if (nextPoi != null && nextNarration != null &&
                         !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
+                        Log.i(TAG, "PREFETCH HIT: using prefetched narration for '${nextPoi.name}'")
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
                         currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
@@ -296,6 +314,7 @@ class TourGuideService : LifecycleService() {
                         isGenerating = false
                         speak(nextNarration, nextPoi.name)
                     } else {
+                        Log.i(TAG, "PREFETCH MISS: nextPoi=${nextPoi?.name} nextNarration=${if (nextNarration != null) "${nextNarration.length} chars" else "null"} — falling back to full cycle")
                         lastLocation?.let { onLocationUpdate(it) }
                     }
                 }
