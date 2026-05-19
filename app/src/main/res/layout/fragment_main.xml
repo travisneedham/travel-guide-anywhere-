@@ -69,7 +69,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="12sp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:text="@string/mode_nearby" />
 
             <com.google.android.material.button.MaterialButton
@@ -78,7 +79,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="12sp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:text="@string/mode_famous" />
 
             <com.google.android.material.button.MaterialButton
@@ -87,7 +89,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="12sp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
                 android:text="@string/mode_route" />
         </com.google.android.material.button.MaterialButtonToggleGroup>
 
