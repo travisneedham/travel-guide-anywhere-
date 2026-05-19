@@ -23,13 +23,13 @@ class MentionedPlacesStore @Inject constructor(
         val summary: String = "",
         val thumbsDown: Boolean = false,
         val autoSkipped: Boolean = false,
+        val wantToVisit: Boolean = false,
+        val wikipediaUrl: String? = null,
     )
 
     private val file: File get() = File(context.filesDir, "mentioned_places.json")
     private val _entries = mutableListOf<Entry>()
 
-    // Names selected this session (in-memory). Prevents same-session repeats
-    // even for POIs not yet committed to disk (played < 10s and not skipped).
     val sessionNames = mutableSetOf<String>()
 
     fun load() {
@@ -46,15 +46,22 @@ class MentionedPlacesStore @Inject constructor(
         }
     }
 
-    // Persists a narrated POI with its AI-generated summary.
-    fun commitWithSummary(osmId: String, name: String, lat: Double, lon: Double, summary: String) {
+    fun commitWithSummary(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null) {
         if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary))
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl))
             save()
         }
     }
 
-    // Persists a skipped POI (no summary available).
+    // Commit immediately (e.g. when user taps a now-playing action before the 10s timer).
+    // No-op if already committed.
+    fun commitEarly(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null) {
+        if (_entries.none { it.osmId == osmId }) {
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl))
+            save()
+        }
+    }
+
     fun commit(osmId: String, name: String, lat: Double, lon: Double) {
         if (_entries.none { it.osmId == osmId }) {
             _entries.add(Entry(osmId, name, lat, lon))
@@ -62,7 +69,6 @@ class MentionedPlacesStore @Inject constructor(
         }
     }
 
-    // Persists a POI that was auto-skipped due to similarity with disliked places.
     fun commitAutoSkipped(osmId: String, name: String, lat: Double, lon: Double, summary: String) {
         if (_entries.none { it.osmId == osmId }) {
             _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, autoSkipped = true))
@@ -70,11 +76,18 @@ class MentionedPlacesStore @Inject constructor(
         }
     }
 
-    // Toggles the thumbsDown flag for an entry and persists.
     fun markThumbsDown(osmId: String) {
         val idx = _entries.indexOfFirst { it.osmId == osmId }
         if (idx >= 0) {
             _entries[idx] = _entries[idx].copy(thumbsDown = !_entries[idx].thumbsDown)
+            save()
+        }
+    }
+
+    fun markWantToVisit(osmId: String) {
+        val idx = _entries.indexOfFirst { it.osmId == osmId }
+        if (idx >= 0) {
+            _entries[idx] = _entries[idx].copy(wantToVisit = !_entries[idx].wantToVisit)
             save()
         }
     }

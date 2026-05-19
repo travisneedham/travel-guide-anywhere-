@@ -299,6 +299,66 @@
                     tools:text="Narrating: Lincoln Memorial"
                     tools:visibility="visible" />
 
+                <!-- Now-playing action bar: navigate, wikipedia, want-to-visit, thumbs-down -->
+                <LinearLayout
+                    android:id="@+id/layout_poi_actions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone">
+
+                    <ImageButton
+                        android:id="@+id/btn_poi_navigate"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/ic_navigate"
+                        android:imageTintList="@color/text_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Open in Maps"
+                        android:padding="8dp" />
+
+                    <ImageButton
+                        android:id="@+id/btn_poi_wikipedia"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/ic_language"
+                        android:imageTintList="@color/text_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Open Wikipedia article"
+                        android:padding="8dp"
+                        android:layout_marginStart="4dp"
+                        android:visibility="gone" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/btn_poi_want_to_visit"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/ic_favorite_border"
+                        android:imageTintList="@color/text_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Want to Visit"
+                        android:padding="8dp" />
+
+                    <ImageButton
+                        android:id="@+id/btn_poi_thumbs_down"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/ic_thumb_down"
+                        android:imageTintList="@color/text_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Not interested"
+                        android:padding="8dp"
+                        android:layout_marginStart="4dp" />
+
+                </LinearLayout>
+
                 <!-- Pause / Skip controls — visible only while speaking or paused -->
                 <LinearLayout
                     android:id="@+id/layout_playback_controls"
@@ -366,48 +426,18 @@
             app:iconGravity="textStart"
             app:iconPadding="12dp" />
 
-        <!-- Recently mentioned places header + "See all" link -->
-        <LinearLayout
-            android:id="@+id/layout_mentioned_header"
+        <!-- Places Covered button — opens the full interactive bottom sheet -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_places_covered"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:visibility="gone"
+            android:layout_height="48dp"
             android:layout_marginTop="24dp"
-            android:layout_marginBottom="8dp">
-
-            <TextView
-                android:id="@+id/tv_mentioned_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/covered_places"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:textAllCaps="true"
-                android:letterSpacing="0.1" />
-
-            <TextView
-                android:id="@+id/tv_see_all_places"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="See all"
-                android:textColor="@color/accent"
-                android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="0dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:foreground="?attr/selectableItemBackgroundBorderless" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/ll_mentioned_places"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="32dp" />
+            android:layout_marginBottom="32dp"
+            android:text="Places Covered (0)"
+            android:visibility="gone"
+            app:strokeColor="@color/stroke"
+            app:cornerRadius="12dp" />
 
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

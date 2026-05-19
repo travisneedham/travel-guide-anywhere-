@@ -7,8 +7,6 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
@@ -33,9 +31,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 @AndroidEntryPoint
 class MainFragment : Fragment() {
@@ -76,6 +71,7 @@ class MainFragment : Fragment() {
         setupSlider()
         setupButtons()
         setupRouteCard()
+        setupNowPlayingActions()
         observeState()
         checkKokoroOnStartup()
     }
@@ -220,7 +216,7 @@ class MainFragment : Fragment() {
             }
         }
         binding.ivPoiImage.setOnClickListener { showFullScreenImage() }
-        binding.tvSeeAllPlaces.setOnClickListener { showAllPlacesDialog() }
+        binding.btnPlacesCovered.setOnClickListener { PlacesBottomSheetFragment().show(childFragmentManager, "places") }
     }
 
     // ── Route card ─────────────────────────────────────────────────────────────
@@ -322,7 +318,10 @@ class MainFragment : Fragment() {
                     }
                 }
                 launch { viewModel.currentTopic.collect { updateCurrentTopic(it) } }
-                launch { viewModel.mentionedPlaces.collect { updateMentionedList(it) } }
+                launch { viewModel.mentionedPlaces.collect { updatePlacesButton(it) } }
+                launch { TourGuideService.currentPoiMeta.collect { meta ->
+                    binding.btnPoiWikipedia.visibility = if (meta.wikipediaUrl != null) View.VISIBLE else View.GONE
+                } }
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     TourGuideService.errorMessage.value = null  // consume — prevents re-toast on lifecycle restart
@@ -448,40 +447,11 @@ class MainFragment : Fragment() {
         if (topic.isNotBlank()) {
             binding.tvCurrentTopic.text = getString(R.string.narrating_label, topic)
             binding.tvCurrentTopic.visibility = View.VISIBLE
+            binding.layoutPoiActions.visibility = View.VISIBLE
+            refreshActionBarState()
         } else {
             binding.tvCurrentTopic.visibility = View.GONE
-        }
-    }
-
-    private fun updateMentionedList(entries: List<MentionedPlacesStore.Entry>) {
-        binding.llMentionedPlaces.removeAllViews()
-        if (entries.isEmpty()) {
-            binding.layoutMentionedHeader.visibility = View.GONE
-            return
-        }
-        binding.layoutMentionedHeader.visibility = View.VISIBLE
-        val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
-        val colorSecondary = requireContext().getColor(R.color.text_secondary)
-        entries.forEachIndexed { index, entry ->
-            val row = LayoutInflater.from(requireContext())
-                .inflate(R.layout.item_mentioned_place, binding.llMentionedPlaces, false)
-            val tvName = row.findViewById<TextView>(R.id.tv_place_name)
-            val tvSummary = row.findViewById<TextView>(R.id.tv_place_summary)
-            tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
-            if (entry.autoSkipped) tvName.setTextColor(colorSecondary)
-            if (entry.summary.isNotBlank()) {
-                tvSummary.text = entry.summary
-                tvSummary.visibility = View.VISIBLE
-            }
-            row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
-            binding.llMentionedPlaces.addView(row)
-            if (index < entries.lastIndex) {
-                val divider = View(requireContext()).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
-                    setBackgroundColor(requireContext().getColor(R.color.stroke))
-                }
-                binding.llMentionedPlaces.addView(divider)
-            }
+            binding.layoutPoiActions.visibility = View.GONE
         }
     }
 
@@ -505,47 +475,60 @@ class MainFragment : Fragment() {
             .show()
     }
 
-    private fun showAllPlacesDialog() {
-        val entries = mentionedPlacesStore.allSorted()
-        if (entries.isEmpty()) return
+    private fun setupNowPlayingActions() {
+        binding.btnPoiNavigate.setOnClickListener {
+            val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
+            val uri = android.net.Uri.parse("geo:${poi.lat},${poi.lon}?q=${android.net.Uri.encode(poi.name)}")
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+            catch (_: Exception) { Toast.makeText(requireContext(), "No maps app found", Toast.LENGTH_SHORT).show() }
+        }
+        binding.btnPoiWikipedia.setOnClickListener {
+            val url = TourGuideService.currentPoiMeta.value.wikipediaUrl ?: return@setOnClickListener
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+            catch (_: Exception) { Toast.makeText(requireContext(), "No browser found", Toast.LENGTH_SHORT).show() }
+        }
+        binding.btnPoiWantToVisit.setOnClickListener {
+            val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
+            val meta = TourGuideService.currentPoiMeta.value
+            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl)
+            mentionedPlacesStore.markWantToVisit(poi.osmId)
+            TourGuideService.mentionedPlaces.value = mentionedPlacesStore.recentFive()
+            refreshActionBarState()
+        }
+        binding.btnPoiThumbsDown.setOnClickListener {
+            val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
+            val meta = TourGuideService.currentPoiMeta.value
+            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl)
+            mentionedPlacesStore.markThumbsDown(poi.osmId)
+            TourGuideService.mentionedPlaces.value = mentionedPlacesStore.recentFive()
+            refreshActionBarState()
+        }
+    }
+
+    private fun refreshActionBarState() {
+        val poi = TourGuideService.currentPois.value.firstOrNull() ?: return
+        val entry = mentionedPlacesStore.allSorted().find { it.osmId == poi.osmId }
+        val wantToVisit = entry?.wantToVisit ?: false
+        val thumbsDown = entry?.thumbsDown ?: false
         val ctx = requireContext()
-        val sdf = SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault())
+        val accentColor = ctx.getColor(R.color.accent)
+        val secondaryColor = ctx.getColor(R.color.text_secondary)
+        val redColor = ctx.getColor(R.color.stop_color)
+        binding.btnPoiWantToVisit.setImageResource(if (wantToVisit) R.drawable.ic_favorite else R.drawable.ic_favorite_border)
+        binding.btnPoiWantToVisit.imageTintList = android.content.res.ColorStateList.valueOf(if (wantToVisit) accentColor else secondaryColor)
+        binding.btnPoiThumbsDown.imageTintList = android.content.res.ColorStateList.valueOf(if (thumbsDown) redColor else secondaryColor)
+        binding.btnPoiThumbsDown.alpha = if (thumbsDown) 1f else 0.5f
+    }
 
-        val list = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            val hPad = (20 * resources.displayMetrics.density).toInt()
-            setPadding(hPad, 0, hPad, 0)
+    private fun updatePlacesButton(entries: List<MentionedPlacesStore.Entry>) {
+        val nonSkipped = entries.count { !it.autoSkipped }
+        if (nonSkipped == 0 && mentionedPlacesStore.allSorted().isEmpty()) {
+            binding.btnPlacesCovered.visibility = View.GONE
+        } else {
+            val total = mentionedPlacesStore.allSorted().size
+            binding.btnPlacesCovered.text = "Places Covered ($total)"
+            binding.btnPlacesCovered.visibility = View.VISIBLE
         }
-        val colorSecondary = ctx.getColor(R.color.text_secondary)
-        entries.forEachIndexed { index, entry ->
-            val row = LayoutInflater.from(ctx)
-                .inflate(R.layout.item_mentioned_place, list, false)
-            val tvName = row.findViewById<TextView>(R.id.tv_place_name)
-            val tvSummary = row.findViewById<TextView>(R.id.tv_place_summary)
-            tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
-            if (entry.autoSkipped) tvName.setTextColor(colorSecondary)
-            if (entry.summary.isNotBlank()) {
-                tvSummary.text = entry.summary
-                tvSummary.visibility = View.VISIBLE
-            }
-            row.findViewById<TextView>(R.id.tv_place_time).text = sdf.format(Date(entry.mentionedAt))
-            list.addView(row)
-            if (index < entries.lastIndex) {
-                val divider = View(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
-                    setBackgroundColor(ctx.getColor(R.color.stroke))
-                }
-                list.addView(divider)
-            }
-        }
-
-        val scroll = android.widget.ScrollView(ctx).apply { addView(list) }
-
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("All Places Covered (${entries.size})")
-            .setView(scroll)
-            .setPositiveButton("Done", null)
-            .show()
     }
 
     private fun showFullScreenImage() {

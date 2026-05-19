@@ -66,9 +66,12 @@ class TourGuideService : LifecycleService() {
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
     @Volatile private var currentNarrationCommit: (() -> Unit)? = null
     @Volatile private var currentNarrationSummary: String = ""
+    @Volatile private var currentNarrationWikipediaUrl: String? = null
     @Volatile private var speakStartTime: Long = 0L
     @Volatile private var prefetchedNarration: Pair<PlaceOfInterest, String>? = null
     @Volatile private var prefetchedNarrationCommit: (() -> Unit)? = null
+    @Volatile private var prefetchedNarrationSummary: String = ""
+    @Volatile private var prefetchedWikipediaUrl: String? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -149,6 +152,7 @@ class TourGuideService : LifecycleService() {
                 )
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
+                currentNarrationWikipediaUrl = null
                 emitCurrentPois(listOf(poi))
                 emitCurrentPoiImage(null)
 
@@ -157,16 +161,19 @@ class TourGuideService : LifecycleService() {
                 )
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
+                currentPoiMeta.value = CurrentPoiMeta(osmId, result.summary, null)
                 isGenerating = false
                 speak(result.text, name)
             } catch (e: CancellationException) {
                 isGenerating = false
                 isReplayMode = false
+                currentPoiMeta.value = CurrentPoiMeta()
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error in replay cycle", e)
                 isGenerating = false
                 isReplayMode = false
+                currentPoiMeta.value = CurrentPoiMeta()
                 stopTour()
             }
         }
@@ -221,20 +228,17 @@ class TourGuideService : LifecycleService() {
 
                 val allPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
                 val pois = allPois.filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
-                Log.d(TAG, "fetchPois: ${allPois.size} total, ${pois.size} unmentioned (famousMode=$famousMode, radius=${radiusMiles}mi)")
+                Log.d(TAG, "fetchPois: ${allPois.size} total, ${pois.size} unmentioned")
 
                 if (pois.isEmpty()) {
-                    Log.d(TAG, "No new POIs — emitting NO_NEW_POIS (all mentioned: ${allPois.size > 0})")
                     emitState(TourState.NO_NEW_POIS)
                     updateNotification("Exploring... waiting for new places", true)
                     isGenerating = false
                     return@launch
                 }
 
-                // Select the first POI that isn't similar to any disliked places.
                 val poi = selectPoi(pois, apiKey)
                 if (poi == null) {
-                    Log.d(TAG, "All POIs auto-skipped — emitting NO_NEW_POIS")
                     emitState(TourState.NO_NEW_POIS)
                     updateNotification("Exploring... waiting for new places", true)
                     isGenerating = false
@@ -247,9 +251,9 @@ class TourGuideService : LifecycleService() {
                 mentionedPlacesStore.sessionNames.add(poi.name)
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
+                currentNarrationWikipediaUrl = null
                 emitCurrentPois(listOf(poi))
 
-                // Fetch POI image in background — non-blocking for the narration flow.
                 emitCurrentPoiImage(null)
                 imageFetchJob?.cancel()
                 imageFetchJob = lifecycleScope.launch {
@@ -258,9 +262,12 @@ class TourGuideService : LifecycleService() {
                     )
                 }
 
+                val wikiUrl = buildWikiUrl(poi.tags["wikipedia"])
                 val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
+                currentNarrationWikipediaUrl = wikiUrl
+                currentPoiMeta.value = CurrentPoiMeta(poi.osmId, result.summary, wikiUrl)
                 isGenerating = false
                 speak(result.text, poi.name)
 
@@ -279,11 +286,6 @@ class TourGuideService : LifecycleService() {
         }
     }
 
-    /**
-     * Iterates through candidates and returns the first one that should not be auto-skipped,
-     * committing any skipped ones to the store. Returns null if all candidates are skipped.
-     * Caps at 5 auto-skips per cycle to bound API cost.
-     */
     private suspend fun selectPoi(candidates: List<PlaceOfInterest>, apiKey: String): PlaceOfInterest? {
         val disliked = mentionedPlacesStore.thumbsDownEntries()
         var skipped = 0
@@ -294,7 +296,7 @@ class TourGuideService : LifecycleService() {
                     candidate.name, desc, disliked.map { it.summary }, apiKey
                 )
                 if (similar) {
-                    Log.d(TAG, "AUTO-SKIP: '${candidate.name}' is similar to disliked places")
+                    Log.d(TAG, "AUTO-SKIP: '${candidate.name}'")
                     mentionedPlacesStore.commitAutoSkipped(candidate.osmId, candidate.name, candidate.lat, candidate.lon, desc)
                     mentionedPlacesStore.sessionNames.add(candidate.name)
                     mentionedPlaces.value = mentionedPlacesStore.recentFive()
@@ -331,12 +333,14 @@ class TourGuideService : LifecycleService() {
                 Log.d(TAG, "PREFETCH: Claude generation done in ${System.currentTimeMillis() - t1}ms")
                 prefetchedNarration = poi to result.text
                 prefetchedNarrationCommit = result.commitHistory
+                prefetchedNarrationSummary = result.summary
+                prefetchedWikipediaUrl = buildWikiUrl(poi.tags["wikipedia"])
                 Log.i(TAG, "PREFETCH: STORED '${poi.name}' — total ${System.currentTimeMillis() - prefetchStart}ms")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
                 ttsEngine?.prewarm(result.text, speechRate)
                 Log.d(TAG, "PREFETCH: prewarm complete for '${poi.name}'")
             } catch (e: CancellationException) {
-                Log.d(TAG, "PREFETCH: job cancelled — prefetchedNarration=${if (prefetchedNarration != null) "STORED" else "null"}")
+                Log.d(TAG, "PREFETCH: job cancelled")
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "PREFETCH: failed — ${e.message}")
@@ -362,13 +366,13 @@ class TourGuideService : LifecycleService() {
         updateNotification("Loading audio: $topicName", true)
 
         val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
-        loadingProgress.value = -1f  // reset to indeterminate at the start of each load
+        loadingProgress.value = -1f
         engine.speak(
             text = text,
             speechRate = speechRate,
             onProgress = { fraction -> loadingProgress.value = fraction },
             onStart = {
-                loadingProgress.value = -1f  // clear progress once playback actually begins
+                loadingProgress.value = -1f
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
                 if (!isReplayMode) {
@@ -382,13 +386,15 @@ class TourGuideService : LifecycleService() {
                 val poi = currentNarrationPoi
                 val commit = currentNarrationCommit.also { currentNarrationCommit = null }
                 val summary = currentNarrationSummary.also { currentNarrationSummary = "" }
+                val wikiUrl = currentNarrationWikipediaUrl.also { currentNarrationWikipediaUrl = null }
                 currentNarrationPoi = null
                 isSpeaking = false
-                Log.i(TAG, "TTS onDone '${poi?.name}' — played ${duration}ms, prefetchReady=${prefetchedNarration != null}, prefetchJobActive=${prefetchJob?.isActive}")
+                Log.i(TAG, "TTS onDone '${poi?.name}' — played ${duration}ms, prefetchReady=${prefetchedNarration != null}")
                 lifecycleScope.launch {
                     emitCurrentTopic("")
+                    currentPoiMeta.value = CurrentPoiMeta()
                     if (poi != null && duration >= 10_000L) {
-                        mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary)
+                        mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary, wikiUrl)
                         commit?.invoke()
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
@@ -401,6 +407,8 @@ class TourGuideService : LifecycleService() {
 
                     val prefetched = prefetchedNarration.also { prefetchedNarration = null }
                     val nextCommit = prefetchedNarrationCommit.also { prefetchedNarrationCommit = null }
+                    val nextSummary = prefetchedNarrationSummary.also { prefetchedNarrationSummary = "" }
+                    val nextWikiUrl = prefetchedWikipediaUrl.also { prefetchedWikipediaUrl = null }
                     prefetchJob?.cancel(); prefetchJob = null
 
                     val nextPoi = prefetched?.first
@@ -411,9 +419,10 @@ class TourGuideService : LifecycleService() {
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
                         currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
-                        currentNarrationSummary = ""
+                        currentNarrationSummary = nextSummary
+                        currentNarrationWikipediaUrl = nextWikiUrl
+                        currentPoiMeta.value = CurrentPoiMeta(nextPoi.osmId, nextSummary, nextWikiUrl)
                         emitCurrentPois(listOf(nextPoi))
-                        // Fetch image for prefetched POI.
                         emitCurrentPoiImage(null)
                         imageFetchJob?.cancel()
                         imageFetchJob = lifecycleScope.launch {
@@ -421,12 +430,12 @@ class TourGuideService : LifecycleService() {
                                 try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
                             )
                         }
-                        isGenerating = true   // block location-triggered cycles during the gap
+                        isGenerating = true
                         delay(3_000L)
                         isGenerating = false
                         speak(nextNarration, nextPoi.name)
                     } else {
-                        Log.i(TAG, "PREFETCH MISS: nextPoi=${nextPoi?.name} nextNarration=${if (nextNarration != null) "${nextNarration.length} chars" else "null"} — falling back to full cycle")
+                        Log.i(TAG, "PREFETCH MISS: nextPoi=${nextPoi?.name} — falling back to full cycle")
                         lastLocation?.let { onLocationUpdate(it) }
                     }
                 }
@@ -435,13 +444,17 @@ class TourGuideService : LifecycleService() {
                 currentNarrationPoi = null
                 currentNarrationCommit = null
                 currentNarrationSummary = ""
+                currentNarrationWikipediaUrl = null
                 isSpeaking = false
                 loadingProgress.value = -1f
                 lifecycleScope.launch {
                     emitCurrentTopic("")
+                    currentPoiMeta.value = CurrentPoiMeta()
                     prefetchJob?.cancel(); prefetchJob = null
                     prefetchedNarration = null
                     prefetchedNarrationCommit = null
+                    prefetchedNarrationSummary = ""
+                    prefetchedWikipediaUrl = null
                     if (isReplayMode) {
                         isReplayMode = false
                         stopTour()
@@ -487,10 +500,12 @@ class TourGuideService : LifecycleService() {
         currentNarrationPoi = null
         currentNarrationCommit = null
         currentNarrationSummary = ""
+        currentNarrationWikipediaUrl = null
 
-        // Capture prefetch before cancelling jobs so we can use it immediately.
         val prefetched = prefetchedNarration.also { prefetchedNarration = null }
         val nextCommit = prefetchedNarrationCommit.also { prefetchedNarrationCommit = null }
+        val nextSummary = prefetchedNarrationSummary.also { prefetchedNarrationSummary = "" }
+        val nextWikiUrl = prefetchedWikipediaUrl.also { prefetchedWikipediaUrl = null }
 
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
@@ -502,6 +517,7 @@ class TourGuideService : LifecycleService() {
         loadingProgress.value = -1f
         emitCurrentTopic("")
         emitCurrentPoiImage(null)
+        currentPoiMeta.value = CurrentPoiMeta()
 
         val nextPoi = prefetched?.first
         val nextNarration = prefetched?.second
@@ -510,7 +526,9 @@ class TourGuideService : LifecycleService() {
             mentionedPlacesStore.sessionNames.add(nextPoi.name)
             currentNarrationCommit = nextCommit
             currentNarrationPoi = nextPoi
-            currentNarrationSummary = ""
+            currentNarrationSummary = nextSummary
+            currentNarrationWikipediaUrl = nextWikiUrl
+            currentPoiMeta.value = CurrentPoiMeta(nextPoi.osmId, nextSummary, nextWikiUrl)
             emitCurrentPois(listOf(nextPoi))
             imageFetchJob = lifecycleScope.launch {
                 emitCurrentPoiImage(
@@ -527,6 +545,7 @@ class TourGuideService : LifecycleService() {
         currentNarrationPoi = null
         currentNarrationCommit = null
         currentNarrationSummary = ""
+        currentNarrationWikipediaUrl = null
         isReplayMode = false
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
@@ -536,14 +555,18 @@ class TourGuideService : LifecycleService() {
         pendingRoute = null
         prefetchedNarration = null
         prefetchedNarrationCommit = null
+        prefetchedNarrationSummary = ""
+        prefetchedWikipediaUrl = null
         fusedLocation.removeLocationUpdates(locationCallback)
         ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
         loadingProgress.value = -1f
-        emitState(TourState.IDLE)
+        emitCurrentTopic("")
         emitCurrentPoiImage(null)
+        currentPoiMeta.value = CurrentPoiMeta()
+        emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -580,6 +603,15 @@ class TourGuideService : LifecycleService() {
             }
             else -> AndroidTtsEngine(this)
         }
+    }
+
+    private fun buildWikiUrl(tag: String?): String? {
+        if (tag == null) return null
+        val colon = tag.indexOf(':')
+        if (colon < 0) return null
+        val lang = tag.substring(0, colon)
+        val title = tag.substring(colon + 1).replace(' ', '_')
+        return "https://$lang.wikipedia.org/wiki/$title"
     }
 
     private val sharedPrefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
@@ -650,13 +682,19 @@ class TourGuideService : LifecycleService() {
 
         @Volatile var pendingRoute: RouteData? = null
 
+        data class CurrentPoiMeta(
+            val osmId: String = "",
+            val summary: String = "",
+            val wikipediaUrl: String? = null,
+        )
+
         val tourState = MutableStateFlow(TourState.IDLE)
         val currentTopic = MutableStateFlow("")
         val currentPois = MutableStateFlow<List<PlaceOfInterest>>(emptyList())
         val mentionedPlaces = MutableStateFlow<List<MentionedPlacesStore.Entry>>(emptyList())
         val errorMessage = MutableStateFlow<String?>(null)
         val currentPoiImage = MutableStateFlow<String?>(null)
-        /** -1f = indeterminate; 0.0–1.0 = known loading progress for LOADING_AUDIO state. */
+        val currentPoiMeta = MutableStateFlow(CurrentPoiMeta())
         val loadingProgress = MutableStateFlow(-1f)
 
         private fun emitState(state: TourState) { tourState.value = state }
