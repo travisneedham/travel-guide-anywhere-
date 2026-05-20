@@ -132,11 +132,19 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
             btnNavigate.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
             btnNavigate.setOnClickListener { openNavigation(entry.lat, entry.lon, entry.name) }
 
-            // Wikipedia
+            // Wikipedia — prefer stored URL, fall back to deriving from tags
+            val wikiUrl = entry.wikipediaUrl ?: entry.tags["wikipedia"]?.let { tag ->
+                val colon = tag.indexOf(':')
+                if (colon >= 0) {
+                    val lang = tag.substring(0, colon)
+                    val title = tag.substring(colon + 1).replace(' ', '_')
+                    "https://$lang.wikipedia.org/wiki/$title"
+                } else null
+            }
             btnWikipedia.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
-            if (entry.wikipediaUrl != null) {
+            if (wikiUrl != null) {
                 btnWikipedia.visibility = View.VISIBLE
-                btnWikipedia.setOnClickListener { openUrl(entry.wikipediaUrl) }
+                btnWikipedia.setOnClickListener { openUrl(wikiUrl) }
             }
 
             // Want to Visit

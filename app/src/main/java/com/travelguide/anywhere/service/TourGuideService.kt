@@ -529,7 +529,10 @@ class TourGuideService : LifecycleService() {
         val poi = currentNarrationPoi
         val commit = currentNarrationCommit
         if (poi != null) {
-            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon, poi.tags)
+            mentionedPlacesStore.commitWithSummary(
+                poi.osmId, poi.name, poi.lat, poi.lon,
+                currentNarrationSummary, currentNarrationWikipediaUrl, poi.tags
+            )
             commit?.invoke()
             mentionedPlaces.value = mentionedPlacesStore.recentFive()
         }
