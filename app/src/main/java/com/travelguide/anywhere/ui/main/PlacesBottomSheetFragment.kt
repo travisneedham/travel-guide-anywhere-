@@ -73,6 +73,7 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
     }
 
     private fun populateList() {
+        val b = _binding ?: return
         val all = mentionedPlacesStore.allSorted()
         val filtered = when (currentFilter) {
             Filter.SAVED -> all.filter { it.wantToVisit }
@@ -80,10 +81,10 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
             Filter.ALL -> all
         }
 
-        binding.tvSheetCount.text = "(${all.size})"
-        binding.tvSheetEmpty.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
+        b.tvSheetCount.text = "(${all.size})"
+        b.tvSheetEmpty.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
 
-        val container = binding.llSheetPlaces
+        val container = b.llSheetPlaces
         container.removeAllViews()
         if (filtered.isEmpty()) return
 

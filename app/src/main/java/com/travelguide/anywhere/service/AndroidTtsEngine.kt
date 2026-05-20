@@ -83,20 +83,27 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
     }
 
     private fun buildListener() = object : UtteranceProgressListener() {
+        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
         override fun onStart(utteranceId: String?) {
-            onStartCallback?.invoke()
-            onStartCallback = null
-            utteranceId?.removePrefix("chunk_")?.toIntOrNull()?.let { currentChunkIndex = it }
+            mainHandler.post {
+                onStartCallback?.invoke()
+                onStartCallback = null
+                utteranceId?.removePrefix("chunk_")?.toIntOrNull()?.let { currentChunkIndex = it }
+            }
         }
         override fun onDone(utteranceId: String?) {
             if (utteranceId == LAST_UTTERANCE_ID) {
-                savedChunks = emptyList()
-                onDoneCallback?.invoke()
+                mainHandler.post {
+                    savedChunks = emptyList()
+                    onDoneCallback?.invoke()
+                }
             }
         }
         override fun onError(utteranceId: String?) {
-            savedChunks = emptyList()
-            onErrorCallback?.invoke()
+            mainHandler.post {
+                savedChunks = emptyList()
+                onErrorCallback?.invoke()
+            }
         }
     }
 
