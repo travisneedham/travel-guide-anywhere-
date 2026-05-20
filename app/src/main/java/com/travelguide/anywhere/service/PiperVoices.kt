@@ -32,7 +32,7 @@ object PiperVoices {
         PiperVoice("en_GB-northern_english_male-medium", "Northern English (Male)", 63),
     )
 
-    const val DEFAULT_VOICE_ID = "en_US-lessac-medium"
+    const val DEFAULT_VOICE_ID = "en_US-libritts_r-medium"
 
     fun byId(id: String): PiperVoice? = ALL.firstOrNull { it.id == id }
 }

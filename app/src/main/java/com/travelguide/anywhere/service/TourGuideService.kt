@@ -594,7 +594,7 @@ class TourGuideService : LifecycleService() {
 
     private fun initTtsEngine() {
         ttsEngine?.shutdown()
-        val provider = sharedPrefs.getString(PREF_TTS_PROVIDER, "android") ?: "android"
+        val provider = sharedPrefs.getString(PREF_TTS_PROVIDER, "piper") ?: "piper"
         ttsEngine = when (provider) {
             "openai" -> {
                 val key = sharedPrefs.getString(PREF_OPENAI_TTS_KEY, "") ?: ""

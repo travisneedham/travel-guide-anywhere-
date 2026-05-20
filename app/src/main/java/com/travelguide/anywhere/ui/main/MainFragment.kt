@@ -23,6 +23,8 @@ import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.databinding.FragmentMainBinding
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
+import com.travelguide.anywhere.service.PiperModelManager
+import com.travelguide.anywhere.service.PiperVoices
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
@@ -49,6 +51,7 @@ class MainFragment : Fragment() {
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
+    @Inject lateinit var piperModelManager: PiperModelManager
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
 
     override fun onCreateView(
@@ -73,7 +76,7 @@ class MainFragment : Fragment() {
         setupRouteCard()
         setupNowPlayingActions()
         observeState()
-        checkKokoroOnStartup()
+        checkPiperOnStartup()
 
         // Show Places Covered immediately on launch if previous-session history exists.
         if (TourGuideService.tourState.value == TourState.IDLE) {
@@ -264,36 +267,23 @@ class MainFragment : Fragment() {
         }
     }
 
-    // ── Kokoro startup ─────────────────────────────────────────────────────────
+    // ── Piper startup ──────────────────────────────────────────────────────────
 
-    private fun checkKokoroOnStartup() {
-        if (kokoroModelManager.isReady) {
-            if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
-                prefs.edit()
-                    .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
-                    .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
-                    .apply()
-            }
-            kokoroModelManager.ensureVoicePreviews(
-                KOKORO_VOICES,
-                com.travelguide.anywhere.service.KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
-            )
-            return
-        }
-        val s = kokoroModelManager.state.value
-        if (s is KokoroModelManager.DownloadState.Downloading ||
-            s is KokoroModelManager.DownloadState.Extracting) return
-
-        val hasPartial = File(requireContext().cacheDir, "kokoro-model.tar.bz2")
-            .let { it.exists() && it.length() > 0 }
-        val buttonLabel = if (hasPartial) "Resume Download" else "Download (~350 MB)"
+    private fun checkPiperOnStartup() {
+        val voice = PiperVoices.byId(PiperVoices.DEFAULT_VOICE_ID) ?: return
+        if (piperModelManager.isVoiceReady(voice.id)) return
+        val s = piperModelManager.stateFor(voice.id).value
+        if (s is PiperModelManager.VoiceState.Downloading ||
+            s is PiperModelManager.VoiceState.Extracting) return
 
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Download AI Voice?")
             .setMessage(
-                "Kokoro provides high-quality, on-device narration — no internet needed once installed. The model is ~350 MB."
+                "Piper provides high-quality, on-device narration — no internet needed once installed. The LibriTTS-R voice is ~110 MB."
             )
-            .setPositiveButton(buttonLabel) { _, _ -> KokoroDownloadService.start(requireContext()) }
+            .setPositiveButton("Download (~110 MB)") { _, _ ->
+                piperModelManager.downloadVoiceIfNeeded(voice)
+            }
             .setNegativeButton("Later", null)
             .show()
     }
@@ -364,12 +354,6 @@ class MainFragment : Fragment() {
                 launch {
                     kokoroModelManager.state.collect { state ->
                         if (state is KokoroModelManager.DownloadState.Ready) {
-                            if (!prefs.getBoolean(PREF_KOKORO_AUTO_SELECTED, false)) {
-                                prefs.edit()
-                                    .putString(TourGuideService.PREF_TTS_PROVIDER, "kokoro")
-                                    .putBoolean(PREF_KOKORO_AUTO_SELECTED, true)
-                                    .apply()
-                            }
                             kokoroModelManager.ensureVoicePreviews(
                                 KOKORO_VOICES,
                                 com.travelguide.anywhere.service.KokoroTtsEngine.VOICE_PREVIEW_TEMPLATE
@@ -594,7 +578,6 @@ class MainFragment : Fragment() {
         const val PREF_FAMOUS_SORT = "pref_famous_mode"
         const val PREF_RADIUS_INDEX = "pref_radius_index"
         const val DEFAULT_RADIUS_INDEX = 15  // 5.0 miles
-        private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
 
         val SLIDER_MILES = floatArrayOf(
             // 0.25 mi steps → 0 to 3 mi
