@@ -168,9 +168,8 @@ class TourGuideService : LifecycleService() {
                 emitCurrentPoiImage(null)
                 imageFetchJob?.cancel()
                 imageFetchJob = lifecycleScope.launch {
-                    emitCurrentPoiImage(
-                        try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
-                    )
+                    val url = try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
+                    if (isActive) emitCurrentPoiImage(url)
                 }
 
                 val result = narrationRepository.generateNarration(
@@ -278,9 +277,8 @@ class TourGuideService : LifecycleService() {
                 emitCurrentPoiImage(null)
                 imageFetchJob?.cancel()
                 imageFetchJob = lifecycleScope.launch {
-                    emitCurrentPoiImage(
-                        try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
-                    )
+                    val url = try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
+                    if (isActive) emitCurrentPoiImage(url)
                 }
 
                 val wikiUrl = buildWikiUrl(poi.tags["wikipedia"])
@@ -451,9 +449,8 @@ class TourGuideService : LifecycleService() {
                         emitCurrentPoiImage(null)
                         imageFetchJob?.cancel()
                         imageFetchJob = lifecycleScope.launch {
-                            emitCurrentPoiImage(
-                                try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
-                            )
+                            val url = try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
+                            if (isActive) emitCurrentPoiImage(url)
                         }
                         isGenerating = true
                         delay(3_000L)
@@ -556,9 +553,8 @@ class TourGuideService : LifecycleService() {
             currentPoiMeta.value = CurrentPoiMeta(nextPoi.osmId, nextSummary, nextWikiUrl)
             emitCurrentPois(listOf(nextPoi))
             imageFetchJob = lifecycleScope.launch {
-                emitCurrentPoiImage(
-                    try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
-                )
+                val url = try { poiImageRepository.fetchImageUrl(nextPoi) } catch (_: Exception) { null }
+                if (isActive) emitCurrentPoiImage(url)
             }
             speak(nextNarration, nextPoi.name)
         } else {
