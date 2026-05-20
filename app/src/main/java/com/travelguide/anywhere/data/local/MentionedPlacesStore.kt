@@ -25,6 +25,7 @@ class MentionedPlacesStore @Inject constructor(
         val autoSkipped: Boolean = false,
         val wantToVisit: Boolean = false,
         val wikipediaUrl: String? = null,
+        val tags: Map<String, String> = emptyMap(),
     )
 
     private val file: File get() = File(context.filesDir, "mentioned_places.json")
@@ -46,32 +47,40 @@ class MentionedPlacesStore @Inject constructor(
         }
     }
 
-    fun commitWithSummary(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null) {
-        if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl))
+    fun commitWithSummary(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null, tags: Map<String, String> = emptyMap()) {
+        val idx = _entries.indexOfFirst { it.osmId == osmId }
+        if (idx < 0) {
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl, tags = tags))
+            save()
+        } else if (summary.isNotBlank() && _entries[idx].summary.isBlank()) {
+            _entries[idx] = _entries[idx].copy(
+                summary = summary,
+                wikipediaUrl = wikipediaUrl ?: _entries[idx].wikipediaUrl,
+                tags = if (tags.isNotEmpty()) tags else _entries[idx].tags,
+            )
             save()
         }
     }
 
     // Commit immediately (e.g. when user taps a now-playing action before the 10s timer).
     // No-op if already committed.
-    fun commitEarly(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null) {
+    fun commitEarly(osmId: String, name: String, lat: Double, lon: Double, summary: String, wikipediaUrl: String? = null, tags: Map<String, String> = emptyMap()) {
         if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl))
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, wikipediaUrl = wikipediaUrl, tags = tags))
             save()
         }
     }
 
-    fun commit(osmId: String, name: String, lat: Double, lon: Double) {
+    fun commit(osmId: String, name: String, lat: Double, lon: Double, tags: Map<String, String> = emptyMap()) {
         if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon))
+            _entries.add(Entry(osmId, name, lat, lon, tags = tags))
             save()
         }
     }
 
-    fun commitAutoSkipped(osmId: String, name: String, lat: Double, lon: Double, summary: String) {
+    fun commitAutoSkipped(osmId: String, name: String, lat: Double, lon: Double, summary: String, tags: Map<String, String> = emptyMap()) {
         if (_entries.none { it.osmId == osmId }) {
-            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, autoSkipped = true))
+            _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, autoSkipped = true, tags = tags))
             save()
         }
     }

@@ -497,7 +497,7 @@ class MainFragment : Fragment() {
         binding.btnPoiWantToVisit.setOnClickListener {
             val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
             val meta = TourGuideService.currentPoiMeta.value
-            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl)
+            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl, poi.tags)
             mentionedPlacesStore.markWantToVisit(poi.osmId)
             TourGuideService.mentionedPlaces.value = mentionedPlacesStore.recentFive()
             refreshActionBarState()
@@ -505,7 +505,7 @@ class MainFragment : Fragment() {
         binding.btnPoiThumbsDown.setOnClickListener {
             val poi = TourGuideService.currentPois.value.firstOrNull() ?: return@setOnClickListener
             val meta = TourGuideService.currentPoiMeta.value
-            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl)
+            mentionedPlacesStore.commitEarly(poi.osmId, poi.name, poi.lat, poi.lon, meta.summary, meta.wikipediaUrl, poi.tags)
             mentionedPlacesStore.markThumbsDown(poi.osmId)
             TourGuideService.mentionedPlaces.value = mentionedPlacesStore.recentFive()
             refreshActionBarState()

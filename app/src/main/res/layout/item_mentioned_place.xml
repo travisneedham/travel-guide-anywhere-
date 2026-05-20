@@ -98,13 +98,23 @@
             android:layout_weight="1" />
 
         <ImageButton
+            android:id="@+id/btn_replay"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_replay"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Replay narration"
+            android:padding="8dp" />
+
+        <ImageButton
             android:id="@+id/btn_want_to_visit"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:src="@drawable/ic_favorite_border"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Want to Visit"
-            android:padding="8dp" />
+            android:padding="8dp"
+            android:layout_marginStart="4dp" />
 
         <ImageButton
             android:id="@+id/btn_thumbs_down"
@@ -117,5 +127,19 @@
             android:layout_marginStart="4dp" />
 
     </LinearLayout>
+
+    <!-- Expandable troubleshooting details (OSM tags etc.) — hidden by default -->
+    <TextView
+        android:id="@+id/tv_place_details"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:padding="8dp"
+        android:background="@color/background"
+        android:fontFamily="monospace"
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:textIsSelectable="true"
+        android:visibility="gone" />
 
 </LinearLayout>

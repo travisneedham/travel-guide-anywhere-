@@ -41,6 +41,7 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
 
     private enum class Filter { ALL, SAVED, SKIPS }
     private var currentFilter = Filter.ALL
+    private val expandedOsmIds = mutableSetOf<String>()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = BottomSheetPlacesBinding.inflate(inflater, container, false)
@@ -102,8 +103,10 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
             val layoutActions = row.findViewById<LinearLayout>(R.id.layout_place_actions)
             val btnNavigate = row.findViewById<ImageButton>(R.id.btn_navigate)
             val btnWikipedia = row.findViewById<ImageButton>(R.id.btn_wikipedia)
+            val btnReplay = row.findViewById<ImageButton>(R.id.btn_replay)
             val btnWantToVisit = row.findViewById<ImageButton>(R.id.btn_want_to_visit)
             val btnThumbsDown = row.findViewById<ImageButton>(R.id.btn_thumbs_down)
+            val tvDetails = row.findViewById<TextView>(R.id.tv_place_details)
 
             // Name
             tvName.text = if (entry.autoSkipped) "${entry.name}  (auto skipped)" else entry.name
@@ -161,9 +164,27 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
                 btnThumbsDown.alpha = 0.3f
             }
 
-            // Tap row to replay (not for auto-skipped)
+            // Replay
+            btnReplay.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
             if (!entry.autoSkipped) {
-                row.setOnClickListener { showReplayDialog(entry) }
+                btnReplay.setOnClickListener { showReplayDialog(entry) }
+            } else {
+                btnReplay.isEnabled = false
+                btnReplay.alpha = 0.3f
+            }
+
+            // Details (expand on row tap) — useful for troubleshooting POI selection
+            val expanded = expandedOsmIds.contains(entry.osmId)
+            if (expanded) {
+                tvDetails.text = buildDetailsText(entry)
+                tvDetails.visibility = View.VISIBLE
+            } else {
+                tvDetails.visibility = View.GONE
+            }
+            row.setOnClickListener {
+                if (expandedOsmIds.contains(entry.osmId)) expandedOsmIds.remove(entry.osmId)
+                else expandedOsmIds.add(entry.osmId)
+                populateList()
             }
 
             container.addView(row)
@@ -176,6 +197,21 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
             }
         }
     }
+
+    private fun buildDetailsText(entry: MentionedPlacesStore.Entry): String = buildString {
+        appendLine("osm_id: ${entry.osmId}")
+        appendLine("lat: ${entry.lat}")
+        appendLine("lon: ${entry.lon}")
+        if (entry.tags.isEmpty()) {
+            appendLine()
+            append("(no OSM tags stored — pre-2.6.2 entry)")
+        } else {
+            appendLine()
+            entry.tags.entries.sortedBy { it.key }.forEach { (k, v) ->
+                appendLine("$k = $v")
+            }
+        }
+    }.trimEnd()
 
     private fun applyWantToVisitState(btn: ImageButton, indicator: ImageView, active: Boolean, activeColor: Int, inactiveColor: Int) {
         btn.setImageResource(if (active) R.drawable.ic_favorite else R.drawable.ic_favorite_border)

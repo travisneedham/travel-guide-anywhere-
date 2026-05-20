@@ -297,7 +297,7 @@ class TourGuideService : LifecycleService() {
                 )
                 if (similar) {
                     Log.d(TAG, "AUTO-SKIP: '${candidate.name}'")
-                    mentionedPlacesStore.commitAutoSkipped(candidate.osmId, candidate.name, candidate.lat, candidate.lon, desc)
+                    mentionedPlacesStore.commitAutoSkipped(candidate.osmId, candidate.name, candidate.lat, candidate.lon, desc, candidate.tags)
                     mentionedPlacesStore.sessionNames.add(candidate.name)
                     mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     skipped++
@@ -394,7 +394,7 @@ class TourGuideService : LifecycleService() {
                     emitCurrentTopic("")
                     currentPoiMeta.value = CurrentPoiMeta()
                     if (poi != null && duration >= 10_000L) {
-                        mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary, wikiUrl)
+                        mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary, wikiUrl, poi.tags)
                         commit?.invoke()
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
@@ -493,7 +493,7 @@ class TourGuideService : LifecycleService() {
         val poi = currentNarrationPoi
         val commit = currentNarrationCommit
         if (poi != null) {
-            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon)
+            mentionedPlacesStore.commit(poi.osmId, poi.name, poi.lat, poi.lon, poi.tags)
             commit?.invoke()
             mentionedPlaces.value = mentionedPlacesStore.recentFive()
         }
