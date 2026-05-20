@@ -20,6 +20,7 @@ import com.google.android.material.textfield.TextInputEditText
 import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
+import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.databinding.FragmentMainBinding
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
@@ -400,7 +401,23 @@ class MainFragment : Fragment() {
                 isTripMode -> "Finding places along route…"
                 else -> getString(R.string.status_fetching)
             }
-            TourState.GENERATING -> getString(R.string.status_generating)
+            TourState.GENERATING -> {
+                val narrationProvider = prefs.getString(
+                    NarrationRepository.PREF_NARRATION_PROVIDER,
+                    NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
+                ) ?: NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
+                val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
+                val modelName = if (narrationProvider == NarrationRepository.NARRATION_PROVIDER_OPENAI) {
+                    savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+                } else {
+                    when (savedModel) {
+                        "claude-sonnet-4-6" -> "Sonnet 4.6"
+                        "claude-opus-4-7"   -> "Opus 4.7"
+                        else                -> "Haiku 4.5"
+                    }
+                }
+                "${getString(R.string.status_generating)} ($modelName)"
+            }
             TourState.LOADING_AUDIO -> getString(R.string.status_loading_audio)
             TourState.SPEAKING -> {
                 val provider = prefs.getString(TourGuideService.PREF_TTS_PROVIDER, "android") ?: "android"
