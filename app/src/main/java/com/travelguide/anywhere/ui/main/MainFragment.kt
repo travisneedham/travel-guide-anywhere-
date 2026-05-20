@@ -597,7 +597,7 @@ class MainFragment : Fragment() {
 
         val SLIDER_MILES = floatArrayOf(
             0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f,
-            10f, 20f, 30f, 40f, 50f, 60f, 70f, 80f, 90f, 100f
+            10f, 20f, 30f, 40f, 50f
         )
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52
