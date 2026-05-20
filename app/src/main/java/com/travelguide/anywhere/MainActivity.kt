@@ -22,19 +22,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    private val locationPermissionLauncher = registerForActivityResult(
+    private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (!fineGranted && !coarseGranted) {
+        val locationRequested = permissions.containsKey(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (locationRequested && !fineGranted && !coarseGranted) {
             Toast.makeText(this, "Location permission is required for the tour guide", Toast.LENGTH_LONG).show()
         }
     }
-
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* notification is optional */ }
 
     private var pendingCrashFile: File? = null
     private val saveCrashLauncher = registerForActivityResult(
@@ -103,12 +100,11 @@ class MainActivity : AppCompatActivity() {
             needed += Manifest.permission.ACCESS_FINE_LOCATION
             needed += Manifest.permission.ACCESS_COARSE_LOCATION
         }
-        if (needed.isNotEmpty()) locationPermissionLauncher.launch(needed.toTypedArray())
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            needed += Manifest.permission.POST_NOTIFICATIONS
         }
+        if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
     }
 }
