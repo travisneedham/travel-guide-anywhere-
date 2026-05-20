@@ -369,12 +369,13 @@ class TourGuideService : LifecycleService() {
         }
     }
 
-    private fun speak(text: String, topicName: String) {
+    private fun speak(text: String, topicName: String, reinit: Boolean = true) {
+        if (reinit) initTtsEngine()
         val engine = ttsEngine
         if (engine == null || !engine.isReady) {
             lifecycleScope.launch {
                 delay(2_000L)
-                speak(text, topicName)
+                speak(text, topicName, reinit = false)
             }
             return
         }
