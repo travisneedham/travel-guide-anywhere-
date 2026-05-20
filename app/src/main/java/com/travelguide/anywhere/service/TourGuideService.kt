@@ -125,12 +125,22 @@ class TourGuideService : LifecycleService() {
         initTtsEngine()
         mentionedPlacesStore.load()
         narrationHistoryStore.load()
+        val storedEntry = mentionedPlacesStore.allSorted().find { it.osmId == osmId }
+        val storedTags = storedEntry?.tags ?: emptyMap()
+        val storedWikiUrl = storedEntry?.wikipediaUrl
         isReplayMode = true
         startForeground(NOTIFICATION_ID, buildNotification("Replaying: $name", true))
-        startReplayCycle(osmId, name, lat, lon)
+        startReplayCycle(osmId, name, lat, lon, storedTags, storedWikiUrl)
     }
 
-    private fun startReplayCycle(osmId: String, name: String, lat: Double, lon: Double) {
+    private fun startReplayCycle(
+        osmId: String,
+        name: String,
+        lat: Double,
+        lon: Double,
+        storedTags: Map<String, String> = emptyMap(),
+        storedWikiUrl: String? = null,
+    ) {
         generationJob?.cancel()
         generationJob = lifecycleScope.launch {
             try {
@@ -148,29 +158,40 @@ class TourGuideService : LifecycleService() {
                     lat = lat,
                     lon = lon,
                     type = PoiType.ATTRACTION,
-                    tags = emptyMap(),
+                    tags = storedTags,
                 )
+                val wikiUrl = storedWikiUrl ?: buildWikiUrl(storedTags["wikipedia"])
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
-                currentNarrationWikipediaUrl = null
+                currentNarrationWikipediaUrl = wikiUrl
                 emitCurrentPois(listOf(poi))
                 emitCurrentPoiImage(null)
+                imageFetchJob?.cancel()
+                imageFetchJob = lifecycleScope.launch {
+                    emitCurrentPoiImage(
+                        try { poiImageRepository.fetchImageUrl(poi) } catch (_: Exception) { null }
+                    )
+                }
 
                 val result = narrationRepository.generateNarration(
                     listOf(poi), location, radiusMiles.coerceAtLeast(1f), apiKey
                 )
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
-                currentPoiMeta.value = CurrentPoiMeta(osmId, result.summary, null)
+                currentPoiMeta.value = CurrentPoiMeta(osmId, result.summary, wikiUrl)
                 isGenerating = false
                 speak(result.text, name)
             } catch (e: CancellationException) {
+                imageFetchJob?.cancel(); imageFetchJob = null
+                emitCurrentPoiImage(null)
                 isGenerating = false
                 isReplayMode = false
                 currentPoiMeta.value = CurrentPoiMeta()
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error in replay cycle", e)
+                imageFetchJob?.cancel(); imageFetchJob = null
+                emitCurrentPoiImage(null)
                 isGenerating = false
                 isReplayMode = false
                 currentPoiMeta.value = CurrentPoiMeta()
