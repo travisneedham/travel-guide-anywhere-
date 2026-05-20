@@ -63,6 +63,8 @@ class TourGuideService : LifecycleService() {
     private var isGenerating = false
     private var isReplayMode = false
     private var savedTopicName = ""
+    // Incremented on every skip/stop so onDone callbacks from prior narrations are discarded.
+    private var speakGeneration = 0
 
     @Volatile private var currentNarrationPoi: PlaceOfInterest? = null
     @Volatile private var currentNarrationCommit: (() -> Unit)? = null
@@ -388,6 +390,7 @@ class TourGuideService : LifecycleService() {
             }
             return
         }
+        val myGeneration = speakGeneration
 
         savedTopicName = topicName
         speakStartTime = System.currentTimeMillis()
@@ -413,6 +416,7 @@ class TourGuideService : LifecycleService() {
             },
             onEnqueued = {},
             onDone = {
+                if (speakGeneration != myGeneration) return@speak
                 val duration = System.currentTimeMillis() - speakStartTime
                 val poi = currentNarrationPoi
                 val commit = currentNarrationCommit.also { currentNarrationCommit = null }
@@ -471,6 +475,7 @@ class TourGuideService : LifecycleService() {
                 }
             },
             onError = {
+                if (speakGeneration != myGeneration) return@speak
                 currentNarrationPoi = null
                 currentNarrationCommit = null
                 currentNarrationSummary = ""
@@ -520,6 +525,7 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun skipCurrent() {
+        speakGeneration++
         val poi = currentNarrationPoi
         val commit = currentNarrationCommit
         if (poi != null) {
@@ -577,6 +583,7 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun stopTour() {
+        speakGeneration++
         currentNarrationPoi = null
         currentNarrationCommit = null
         currentNarrationSummary = ""
