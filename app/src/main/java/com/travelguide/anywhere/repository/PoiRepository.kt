@@ -47,7 +47,11 @@ class PoiRepository @Inject constructor(
         radiusMiles: Float,
         famousMode: Boolean = false
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
-        val radiusMeters = (radiusMiles * 1609.34).toInt()
+        // Famous mode caps at 25 mi (40 km) — the wikipedia node subquery times out beyond that.
+        val radiusMeters = if (famousMode)
+            minOf((radiusMiles * 1609.34).toInt(), 40_000)
+        else
+            (radiusMiles * 1609.34).toInt()
         val mode = if (famousMode) "famous" else "nearby"
         Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMiles}mi (${radiusMeters}m)")
 
@@ -152,7 +156,7 @@ class PoiRepository @Inject constructor(
     // - result cap 200: enough to find real famous places in metro areas while keeping response
     //   size manageable; code sorts by fameScore afterwards.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:30];\n" +
+        "[out:json][timeout:45];\n" +
         "(\n" +
         "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
