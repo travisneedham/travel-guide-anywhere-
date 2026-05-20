@@ -15,6 +15,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.travelguide.anywhere.databinding.ActivityMainBinding
 import com.travelguide.anywhere.ui.main.MainFragment
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.File
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -35,6 +36,24 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* notification is optional */ }
 
+    private var pendingCrashFile: File? = null
+    private val saveCrashLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        uri?.let {
+            try {
+                contentResolver.openOutputStream(it)?.use { os ->
+                    os.write((pendingCrashFile?.readText() ?: "").toByteArray())
+                }
+                Toast.makeText(this, "Crash report saved", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+        pendingCrashFile?.delete()
+        pendingCrashFile = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -50,23 +69,31 @@ class MainActivity : AppCompatActivity() {
             }
             val crashFile = CrashReporter.crashFile(this)
             if (crashFile.exists()) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("Crash report found")
-                    .setMessage("The app crashed last session. Share the report?")
-                    .setPositiveButton("Share") { _, _ ->
-                        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", crashFile)
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        startActivity(Intent.createChooser(share, "Share crash report"))
-                        crashFile.delete()
-                    }
-                    .setNegativeButton("Dismiss") { _, _ -> crashFile.delete() }
-                    .show()
+                showCrashDialog(crashFile)
             }
         }
+    }
+
+    private fun showCrashDialog(crashFile: File) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Crash report found")
+            .setMessage("The app crashed last session. Save or share the report?")
+            .setPositiveButton("Save to Downloads") { _, _ ->
+                pendingCrashFile = crashFile
+                saveCrashLauncher.launch("travel_guide_crash.txt")
+            }
+            .setNeutralButton("Share") { _, _ ->
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", crashFile)
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(share, "Share crash report"))
+                crashFile.delete()
+            }
+            .setNegativeButton("Dismiss") { _, _ -> crashFile.delete() }
+            .show()
     }
 
     private fun requestPermissionsIfNeeded() {
