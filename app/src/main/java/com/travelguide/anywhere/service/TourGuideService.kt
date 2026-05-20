@@ -370,7 +370,10 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun speak(text: String, topicName: String, reinit: Boolean = true) {
-        if (reinit) initTtsEngine()
+        if (reinit) {
+            isSpeaking = true  // close the onLocationUpdate window before engine init
+            initTtsEngine()
+        }
         val engine = ttsEngine
         if (engine == null || !engine.isReady) {
             lifecycleScope.launch {
