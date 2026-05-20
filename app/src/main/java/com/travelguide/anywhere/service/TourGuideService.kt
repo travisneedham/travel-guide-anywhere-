@@ -170,7 +170,7 @@ class TourGuideService : LifecycleService() {
                     type = PoiType.ATTRACTION,
                     tags = storedTags,
                 )
-                val wikiUrl = storedWikiUrl ?: buildWikiUrl(storedTags["wikipedia"])
+                val wikiUrl = storedWikiUrl ?: poiImageRepository.fetchWikipediaUrl(poi)
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
                 currentNarrationWikipediaUrl = wikiUrl
@@ -291,7 +291,7 @@ class TourGuideService : LifecycleService() {
                     if (isActive) emitCurrentPoiImage(url)
                 }
 
-                val wikiUrl = buildWikiUrl(poi.tags["wikipedia"])
+                val wikiUrl = poiImageRepository.fetchWikipediaUrl(poi)
                 val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles)
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
@@ -363,7 +363,7 @@ class TourGuideService : LifecycleService() {
                 prefetchedNarration = poi to result.text
                 prefetchedNarrationCommit = result.commitHistory
                 prefetchedNarrationSummary = result.summary
-                prefetchedWikipediaUrl = buildWikiUrl(poi.tags["wikipedia"])
+                prefetchedWikipediaUrl = poiImageRepository.fetchWikipediaUrl(poi)
                 Log.i(TAG, "PREFETCH: STORED '${poi.name}' — total ${System.currentTimeMillis() - prefetchStart}ms")
                 val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 1.0f)
                 ttsEngine?.prewarm(result.text, speechRate)
@@ -647,14 +647,6 @@ class TourGuideService : LifecycleService() {
         }
     }
 
-    private fun buildWikiUrl(tag: String?): String? {
-        if (tag == null) return null
-        val colon = tag.indexOf(':')
-        if (colon < 0) return null
-        val lang = tag.substring(0, colon)
-        val title = tag.substring(colon + 1).replace(' ', '_')
-        return "https://$lang.wikipedia.org/wiki/$title"
-    }
 
     private val sharedPrefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
 

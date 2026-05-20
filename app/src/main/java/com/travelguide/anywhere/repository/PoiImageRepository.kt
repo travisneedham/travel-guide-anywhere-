@@ -18,6 +18,40 @@ class PoiImageRepository @Inject constructor(
     private val gson: Gson
 ) {
     /**
+     * Returns a Wikipedia article URL for the POI, or null if none can be resolved.
+     * Tries the OSM `wikipedia` tag first (no network), then queries the Wikidata sitelinks
+     * API when only a `wikidata` tag is present.
+     */
+    suspend fun fetchWikipediaUrl(poi: PlaceOfInterest): String? = withContext(Dispatchers.IO) {
+        val wp = poi.tags["wikipedia"]
+        if (wp != null) {
+            val colon = wp.indexOf(':')
+            if (colon >= 0) {
+                val lang = wp.substring(0, colon)
+                val title = wp.substring(colon + 1).replace(' ', '_')
+                return@withContext "https://$lang.wikipedia.org/wiki/$title"
+            }
+        }
+        val wd = poi.tags["wikidata"] ?: return@withContext null
+        fetchWikidataWikiUrl(wd)
+    }
+
+    private fun fetchWikidataWikiUrl(qid: String): String? {
+        val url = "https://www.wikidata.org/w/api.php" +
+                "?action=wbgetentities&ids=$qid&props=sitelinks&sitefilter=enwiki&format=json"
+        return get(url)?.let { body ->
+            gson.fromJson(body, JsonObject::class.java)
+                ?.getAsJsonObject("entities")
+                ?.getAsJsonObject(qid)
+                ?.getAsJsonObject("sitelinks")
+                ?.getAsJsonObject("enwiki")
+                ?.get("title")?.asString
+                ?.replace(' ', '_')
+                ?.let { title -> "https://en.wikipedia.org/wiki/$title" }
+        }
+    }
+
+    /**
      * Returns a displayable image URL for the POI, or null if none is found.
      * Priority: wikipedia tag → wikidata P18 → wikimedia_commons File tag
      */
