@@ -548,6 +548,12 @@ class TourGuideService : LifecycleService() {
         emitCurrentPoiImage(null)
         currentPoiMeta.value = CurrentPoiMeta()
 
+        if (isReplayMode) {
+            isReplayMode = false
+            stopTour()
+            return
+        }
+
         val nextPoi = prefetched?.first
         val nextNarration = prefetched?.second
         if (nextPoi != null && nextNarration != null &&
