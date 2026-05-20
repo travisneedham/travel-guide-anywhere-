@@ -173,10 +173,11 @@ class MainFragment : Fragment() {
 
     private fun updateRangeLabel(value: Float) {
         val miles = SLIDER_MILES.getOrElse(value.toInt()) { SLIDER_MILES[DEFAULT_RADIUS_INDEX] }
+        val quarters = (miles * 4).toLong()
         val formatted = when {
-            miles < 1f  -> "%.2f".format(miles)
-            miles < 10f -> "%.1f".format(miles)
-            else        -> "%.0f".format(miles)
+            quarters % 4 == 0L -> "%.0f".format(miles)  // whole mile: "3"
+            quarters % 2 == 0L -> "%.1f".format(miles)  // half mile:  "3.5"
+            else               -> "%.2f".format(miles)  // quarter:    "1.25"
         }
         binding.tvRangeLabel.text = getString(R.string.range_label, formatted)
     }
@@ -592,12 +593,16 @@ class MainFragment : Fragment() {
         const val PREF_TRIP_MODE = "pref_route_mode"
         const val PREF_FAMOUS_SORT = "pref_famous_mode"
         const val PREF_RADIUS_INDEX = "pref_radius_index"
-        const val DEFAULT_RADIUS_INDEX = 7  // 5.0 miles
+        const val DEFAULT_RADIUS_INDEX = 15  // 5.0 miles
         private const val PREF_KOKORO_AUTO_SELECTED = "pref_kokoro_auto_selected"
 
         val SLIDER_MILES = floatArrayOf(
-            0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f,
-            10f, 20f, 30f, 40f, 50f
+            // 0.25 mi steps → 0 to 3 mi
+            0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.25f, 2.5f, 2.75f, 3.0f,
+            // 0.5 mi steps → 3.5 to 10 mi
+            3.5f, 4.0f, 4.5f, 5.0f, 5.5f, 6.0f, 6.5f, 7.0f, 7.5f, 8.0f, 8.5f, 9.0f, 9.5f, 10.0f,
+            // 5 mi steps → 15 to 50 mi
+            15f, 20f, 25f, 30f, 35f, 40f, 45f, 50f
         )
 
         // kokoro-multi-lang-v1_0 — speaker IDs 0-52
