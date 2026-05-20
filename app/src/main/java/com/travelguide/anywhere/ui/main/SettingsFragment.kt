@@ -69,6 +69,7 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var kokoroModelManager: KokoroModelManager
     @Inject lateinit var piperModelManager: PiperModelManager
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
+    @Inject lateinit var narrationRepository: NarrationRepository
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -101,7 +102,7 @@ class SettingsFragment : Fragment() {
         setupToolbar()
         setupCollapsibleSections()
         setupFeedback()
-        loadApiKey()
+        loadAuthorshipEngine()
         loadVoiceSettings()
         loadInterestFilters()
         loadPrompts()
@@ -209,10 +210,86 @@ class SettingsFragment : Fragment() {
         binding.headerDiag.setOnClickListener { toggle(binding.bodyDiag, binding.indDiag) }
     }
 
-    private fun loadApiKey() {
+    private fun loadAuthorshipEngine() {
         binding.etApiKey.setText(
             prefs.getString(MainFragment.PREF_API_KEY, BuildConfig.ANTHROPIC_API_KEY)
         )
+        when (prefs.getString(NarrationRepository.PREF_NARRATION_PROVIDER, NarrationRepository.NARRATION_PROVIDER_ANTHROPIC)) {
+            NarrationRepository.NARRATION_PROVIDER_OPENAI -> binding.rbNarrationOpenai.isChecked = true
+            else -> binding.rbNarrationAnthropic.isChecked = true
+        }
+        applyNarrationProviderVisibility()
+        binding.rgNarrationProvider.setOnCheckedChangeListener { _, _ -> applyNarrationProviderVisibility() }
+
+        setupAnthropicModels()
+
+        binding.etOpenaiNarrationKey.setText(prefs.getString(NarrationRepository.PREF_OPENAI_NARRATION_KEY, ""))
+        binding.btnFetchOpenaiNarration.setOnClickListener { fetchOpenAiNarrationData() }
+
+        val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
+        if (binding.rbNarrationOpenai.isChecked && savedModel.isNotBlank()) {
+            populateOpenAiModelDropdown(listOf(savedModel), savedModel)
+        }
+    }
+
+    private fun applyNarrationProviderVisibility() {
+        val isOpenAI = binding.rbNarrationOpenai.isChecked
+        binding.sectionAuthorshipAnthropic.visibility = if (isOpenAI) View.GONE else View.VISIBLE
+        binding.sectionAuthorshipOpenai.visibility = if (isOpenAI) View.VISIBLE else View.GONE
+    }
+
+    private fun setupAnthropicModels() {
+        binding.actvNarrationModel.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, ANTHROPIC_MODEL_LABELS)
+        )
+        val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
+        val savedIdx = ANTHROPIC_MODEL_IDS.indexOf(savedModel).let { if (it < 0) 0 else it }
+        binding.actvNarrationModel.setText(ANTHROPIC_MODEL_LABELS[savedIdx], false)
+        binding.tvNarrationPricing.text = ANTHROPIC_MODEL_PRICING[savedIdx]
+        binding.actvNarrationModel.setOnItemClickListener { _, _, position, _ ->
+            binding.tvNarrationPricing.text = ANTHROPIC_MODEL_PRICING.getOrElse(position) { "" }
+        }
+    }
+
+    private fun populateOpenAiModelDropdown(models: List<String>, selectedModel: String) {
+        if (models.isEmpty()) return
+        binding.actvOpenaiNarrationModel.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, models)
+        )
+        val selected = if (selectedModel in models) selectedModel else models.first()
+        binding.actvOpenaiNarrationModel.setText(selected, false)
+        binding.tvOpenaiNarrationPricing.text =
+            NarrationRepository.OPENAI_MODEL_PRICING[selected] ?: "~unknown"
+        binding.actvOpenaiNarrationModel.setOnItemClickListener { _, _, position, _ ->
+            val model = models.getOrElse(position) { "" }
+            binding.tvOpenaiNarrationPricing.text =
+                NarrationRepository.OPENAI_MODEL_PRICING[model] ?: "~unknown"
+        }
+    }
+
+    private fun fetchOpenAiNarrationData() {
+        val key = binding.etOpenaiNarrationKey.text?.toString()?.trim() ?: ""
+        if (key.isBlank()) {
+            Toast.makeText(requireContext(), "Enter your OpenAI API key first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnFetchOpenaiNarration.isEnabled = false
+        binding.btnFetchOpenaiNarration.text = "Fetching…"
+        binding.tvOpenaiNarrationBalance.text = "Fetching…"
+        viewLifecycleOwner.lifecycleScope.launch {
+            val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
+            val models = narrationRepository.fetchOpenAiModels(key)
+            val balance = narrationRepository.fetchOpenAiBalance(key)
+            binding.tvOpenaiNarrationBalance.text = balance
+            if (models.isNotEmpty()) {
+                val preferred = savedModel.takeIf { it in models } ?: models.first()
+                populateOpenAiModelDropdown(models, preferred)
+            } else {
+                binding.tvOpenaiNarrationBalance.text = "$balance  (model fetch failed — check key)"
+            }
+            binding.btnFetchOpenaiNarration.isEnabled = true
+            binding.btnFetchOpenaiNarration.text = "Fetch Models & Balance"
+        }
     }
 
     private fun loadVoiceSettings() {
@@ -776,6 +853,20 @@ class SettingsFragment : Fragment() {
 
     private fun saveSettings() {
         val anthropicKey = binding.etApiKey.text?.toString()?.trim() ?: ""
+
+        val narrationProvider = if (binding.rbNarrationOpenai.isChecked)
+            NarrationRepository.NARRATION_PROVIDER_OPENAI
+        else
+            NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
+        val anthropicModelIdx = ANTHROPIC_MODEL_LABELS.indexOf(
+            binding.actvNarrationModel.text.toString()
+        ).let { if (it < 0) 0 else it }
+        val narrationModel = if (binding.rbNarrationOpenai.isChecked)
+            binding.actvOpenaiNarrationModel.text.toString().trim()
+        else
+            ANTHROPIC_MODEL_IDS[anthropicModelIdx]
+        val openAiNarrationKey = binding.etOpenaiNarrationKey.text?.toString()?.trim() ?: ""
+
         val rate = binding.sliderSpeechRate.value
         val provider = when (binding.rgTtsProvider.checkedRadioButtonId) {
             R.id.rb_openai -> "openai"
@@ -795,6 +886,9 @@ class SettingsFragment : Fragment() {
 
         prefs.edit()
             .putString(MainFragment.PREF_API_KEY, anthropicKey)
+            .putString(NarrationRepository.PREF_NARRATION_PROVIDER, narrationProvider)
+            .putString(NarrationRepository.PREF_NARRATION_MODEL, narrationModel)
+            .putString(NarrationRepository.PREF_OPENAI_NARRATION_KEY, openAiNarrationKey)
             .putFloat(MainFragment.PREF_SPEECH_RATE, rate)
             .putString(TourGuideService.PREF_TTS_PROVIDER, provider)
             .putString(TourGuideService.PREF_OPENAI_TTS_KEY, openAiKey)
@@ -946,7 +1040,18 @@ class SettingsFragment : Fragment() {
     }
 
     companion object {
-        // Replace with your actual feedback email address before publishing.
-        const val FEEDBACK_EMAIL = "your-email@example.com"
+        const val FEEDBACK_EMAIL = "travisneedham@gmail.com"
+
+        val ANTHROPIC_MODEL_IDS = listOf(
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7",
+        )
+        val ANTHROPIC_MODEL_LABELS = listOf(
+            "Haiku 4.5 — fastest, cheapest",
+            "Sonnet 4.6 — balanced",
+            "Opus 4.7 — most capable",
+        )
+        val ANTHROPIC_MODEL_PRICING = listOf("~\$0.005", "~\$0.018", "~\$0.090")
     }
 }

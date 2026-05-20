@@ -174,7 +174,7 @@ class TourGuideService : LifecycleService() {
                 }
 
                 val result = narrationRepository.generateNarration(
-                    listOf(poi), location, radiusMiles.coerceAtLeast(1f), apiKey
+                    listOf(poi), location, radiusMiles.coerceAtLeast(1f)
                 )
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
@@ -258,7 +258,7 @@ class TourGuideService : LifecycleService() {
                     return@launch
                 }
 
-                val poi = selectPoi(pois, apiKey)
+                val poi = selectPoi(pois)
                 if (poi == null) {
                     emitState(TourState.NO_NEW_POIS)
                     updateNotification("Exploring... waiting for new places", true)
@@ -284,7 +284,7 @@ class TourGuideService : LifecycleService() {
                 }
 
                 val wikiUrl = buildWikiUrl(poi.tags["wikipedia"])
-                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles)
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
                 currentNarrationWikipediaUrl = wikiUrl
@@ -307,14 +307,14 @@ class TourGuideService : LifecycleService() {
         }
     }
 
-    private suspend fun selectPoi(candidates: List<PlaceOfInterest>, apiKey: String): PlaceOfInterest? {
+    private suspend fun selectPoi(candidates: List<PlaceOfInterest>): PlaceOfInterest? {
         val disliked = mentionedPlacesStore.thumbsDownEntries()
         var skipped = 0
         for (candidate in candidates) {
             if (disliked.isNotEmpty() && skipped < 5) {
                 val desc = "${candidate.name} — ${candidate.shortDescription}"
                 val similar = narrationRepository.isSimilarToDisliked(
-                    candidate.name, desc, disliked.map { it.summary }, apiKey
+                    candidate.name, desc, disliked.map { it.summary }
                 )
                 if (similar) {
                     Log.d(TAG, "AUTO-SKIP: '${candidate.name}'")
@@ -350,7 +350,7 @@ class TourGuideService : LifecycleService() {
                 val poi = pois.first()
                 Log.d(TAG, "PREFETCH: generating narration for '${poi.name}'")
                 val t1 = System.currentTimeMillis()
-                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles, apiKey)
+                val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles)
                 Log.d(TAG, "PREFETCH: Claude generation done in ${System.currentTimeMillis() - t1}ms")
                 prefetchedNarration = poi to result.text
                 prefetchedNarrationCommit = result.commitHistory

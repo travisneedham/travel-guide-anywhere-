@@ -5,6 +5,7 @@ import android.location.Location
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.remote.ClaudeApiService
@@ -13,8 +14,10 @@ import com.travelguide.anywhere.data.remote.dto.ClaudeRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,7 +42,6 @@ class NarrationRepository @Inject constructor(
         pois: List<PlaceOfInterest>,
         location: Location,
         radiusMiles: Float,
-        apiKey: String,
     ): NarrationResult {
         val poi = pois.first()
         val distStr = "%.2f".format(poi.distanceMiles)
@@ -52,7 +54,6 @@ class NarrationRepository @Inject constructor(
 
         val locationStr = "%.4f°N, %.4f°W".format(location.latitude, Math.abs(location.longitude))
 
-        // Fetch Wikipedia intro for enrichment — never blocks narration if it fails.
         val wikiExtract = poi.tags["wikipedia"]?.let { fetchWikipediaIntro(it) }
         if (wikiExtract != null) {
             Log.d(TAG, "Wikipedia context for '${poi.name}': ${wikiExtract.length} chars")
@@ -66,7 +67,6 @@ class NarrationRepository @Inject constructor(
             .replace("{location}", locationStr)
             .replace("{poi}", poiLine)
 
-        // Always appended — needed to populate the Places Covered summary.
         val summaryInstruction = "\n\nBefore your narration, write one sentence on the very first line " +
             "that describes what this place is — for example: \"A mid-nineteenth-century lighthouse " +
             "perched on a rocky headland\" or \"The childhood home of a notorious outlaw.\" " +
@@ -91,18 +91,54 @@ class NarrationRepository @Inject constructor(
         val maxTokens = maxTokensFor(poi, wikiExtract != null)
         val messages = history + listOf(ClaudeMessage(role = "user", content = userMessageText))
 
+        val provider = prefs.getString(PREF_NARRATION_PROVIDER, NARRATION_PROVIDER_ANTHROPIC)
+            ?: NARRATION_PROVIDER_ANTHROPIC
+        val savedModel = prefs.getString(PREF_NARRATION_MODEL, "") ?: ""
+
+        Log.d(TAG, "generateNarration: provider=$provider, model=${savedModel.ifBlank { "(default)" }}, " +
+            "${history.size / 2} history pairs, maxTokens=$maxTokens, wiki=${wikiExtract != null}")
+
+        if (provider == NARRATION_PROVIDER_OPENAI) {
+            val openAiKey = prefs.getString(PREF_OPENAI_NARRATION_KEY, "") ?: ""
+            val openAiModel = savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+            repeat(3) { attempt ->
+                try {
+                    val text = callOpenAiChat(openAiKey, openAiModel, systemPrompt, history, userMessageText, maxTokens)
+                    if (text.isNotBlank()) {
+                        val (summary, narrationText) = parseSummaryAndNarration(text)
+                        return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                            historyStore.append(
+                                userMessage = userMessageText,
+                                assistantMessage = text,
+                                lat = location.latitude,
+                                lon = location.longitude,
+                            )
+                        })
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "OpenAI attempt ${attempt + 1} failed: ${e.message}")
+                    if (attempt == 2) return NarrationResult(text = "OpenAI error: ${e.message}", commitHistory = {})
+                }
+                delay(3_000L * (attempt + 1))
+            }
+            return NarrationResult(text = "Unable to generate narration at this time.", commitHistory = {})
+        }
+
+        // Anthropic path
+        val anthropicKey = prefs.getString(PREF_ANTHROPIC_KEY, BuildConfig.ANTHROPIC_API_KEY)
+            ?: BuildConfig.ANTHROPIC_API_KEY
+        val anthropicModel = savedModel.takeIf { it.isNotBlank() } ?: "claude-haiku-4-5-20251001"
+
         val request = ClaudeRequest(
+            model = anthropicModel,
             system = systemPrompt,
             messages = messages,
             maxTokens = maxTokens,
         )
 
-        Log.d(TAG, "Claude request: ${history.size / 2} history pairs, maxTokens=$maxTokens, wiki=${wikiExtract != null}")
-
-        // Retry up to 3 times on transient errors.
         repeat(3) { attempt ->
             try {
-                val response = claudeApi.createMessage(apiKey = apiKey, request = request)
+                val response = claudeApi.createMessage(apiKey = anthropicKey, request = request)
                 val text = response.text
                 if (text.isNotBlank()) {
                     val (summary, narrationText) = parseSummaryAndNarration(text)
@@ -131,17 +167,18 @@ class NarrationRepository @Inject constructor(
     }
 
     /**
-     * Asks Claude (Haiku, cheapest model) whether a candidate POI belongs to the same
-     * category as any of the user's disliked place summaries. Returns false on any error
-     * so errors never cause unwanted skips.
+     * Asks Claude Haiku whether a candidate POI belongs to the same category as any disliked
+     * place summaries. Always uses Anthropic regardless of the user's narration provider setting.
+     * Returns false on any error so errors never cause unwanted skips.
      */
     suspend fun isSimilarToDisliked(
         poiName: String,
         poiDesc: String,
         dislikedSummaries: List<String>,
-        apiKey: String,
     ): Boolean {
         if (dislikedSummaries.isEmpty()) return false
+        val apiKey = prefs.getString(PREF_ANTHROPIC_KEY, BuildConfig.ANTHROPIC_API_KEY)
+            ?: BuildConfig.ANTHROPIC_API_KEY
         val list = dislikedSummaries.take(20).joinToString("\n") { "- $it" }
         val request = ClaudeRequest(
             model = "claude-haiku-4-5-20251001",
@@ -163,16 +200,111 @@ class NarrationRepository @Inject constructor(
         }
     }
 
-    /**
-     * Splits Claude's response into a one-sentence summary (first line) and the narration body.
-     * Falls back to ("", fullText) if the response doesn't follow the expected format.
-     */
+    /** Fetches chat-capable models from the OpenAI API, sorted with preferred models first. */
+    suspend fun fetchOpenAiModels(apiKey: String): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("https://api.openai.com/v1/models")
+                .header("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+            val responseBody = okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                response.body?.string() ?: return@withContext emptyList()
+            }
+            val json = gson.fromJson(responseBody, JsonObject::class.java)
+            json.getAsJsonArray("data")
+                ?.mapNotNull { it.asJsonObject?.get("id")?.asString }
+                ?.filter { id ->
+                    val isChatLike = id.startsWith("gpt-") ||
+                        Regex("^o[134]-").containsMatchIn(id) || id == "o1-mini"
+                    val isExcluded = id.contains("audio") || id.contains("realtime") ||
+                        id.contains("tts") || id.contains("embedding") ||
+                        id.contains("dall-e") || id.contains("instruct")
+                    isChatLike && !isExcluded
+                }
+                ?.sortedWith(
+                    compareByDescending<String> { it in PREFERRED_OPENAI_MODELS }
+                        .thenBy { it }
+                )
+                ?.distinct()
+                ?: emptyList()
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchOpenAiModels failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Attempts to fetch the OpenAI account balance; falls back to a link on any error. */
+    suspend fun fetchOpenAiBalance(apiKey: String): String = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("https://api.openai.com/v1/organization/balance")
+                .header("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+            val responseBody = okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext "Balance: See platform.openai.com/usage"
+                response.body?.string() ?: return@withContext "Balance: See platform.openai.com/usage"
+            }
+            val json = gson.fromJson(responseBody, JsonObject::class.java)
+            val available = json.getAsJsonArray("available")
+                ?.firstOrNull()?.asJsonObject
+                ?.get("amount")?.asDouble
+            if (available != null) "Balance: $${"%.2f".format(available)}"
+            else "Balance: See platform.openai.com/usage"
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchOpenAiBalance failed: ${e.message}")
+            "Balance: See platform.openai.com/usage"
+        }
+    }
+
+    private suspend fun callOpenAiChat(
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        history: List<ClaudeMessage>,
+        userMessage: String,
+        maxTokens: Int,
+    ): String = withContext(Dispatchers.IO) {
+        val messages = buildList {
+            add(mapOf("role" to "system", "content" to systemPrompt))
+            addAll(history.map { mapOf("role" to it.role, "content" to it.content) })
+            add(mapOf("role" to "user", "content" to userMessage))
+        }
+        val bodyJson = gson.toJson(mapOf(
+            "model" to model,
+            "messages" to messages,
+            "max_tokens" to maxTokens,
+        ))
+        val requestBody = bodyJson.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", "Bearer $apiKey")
+            .post(requestBody)
+            .build()
+        val responseBody = okHttpClient.newCall(request).execute().use { response ->
+            val b = response.body?.string() ?: throw Exception("Empty response from OpenAI")
+            if (!response.isSuccessful) {
+                val errMsg = gson.fromJson(b, JsonObject::class.java)
+                    ?.getAsJsonObject("error")?.get("message")?.asString
+                throw Exception(errMsg ?: "HTTP ${response.code}")
+            }
+            b
+        }
+        gson.fromJson(responseBody, JsonObject::class.java)
+            ?.getAsJsonArray("choices")
+            ?.firstOrNull()?.asJsonObject
+            ?.getAsJsonObject("message")
+            ?.get("content")?.asString
+            ?: throw Exception("No content in OpenAI response")
+    }
+
     private fun parseSummaryAndNarration(text: String): Pair<String, String> {
         val idx = text.indexOf("\n\n")
         if (idx in 1..300) {
             val firstLine = text.substring(0, idx).trim()
             val rest = text.substring(idx + 2).trim()
-            // The summary should be a single sentence, much shorter than the narration.
             if (firstLine.isNotBlank() && rest.isNotBlank() && firstLine.length < rest.length / 2) {
                 return firstLine to rest
             }
@@ -180,8 +312,6 @@ class NarrationRepository @Inject constructor(
         return "" to text
     }
 
-    // Fetch the intro section of a Wikipedia article. Returns null on any failure.
-    // The Wikipedia tag in OSM is formatted as "en:Article Title".
     private suspend fun fetchWikipediaIntro(wikipediaTag: String): String? = withContext(Dispatchers.IO) {
         try {
             val colon = wikipediaTag.indexOf(':')
@@ -215,8 +345,6 @@ class NarrationRepository @Inject constructor(
             val extract = page.get("extract")?.asString?.trim() ?: return@withContext null
             if (extract.isBlank()) return@withContext null
 
-            // Cap at 6000 chars — Wikipedia intro sections are typically 500–3000 chars;
-            // this prevents extreme cases from ballooning token cost.
             extract.take(6000)
         } catch (e: Exception) {
             Log.w(TAG, "Wikipedia fetch failed for '$wikipediaTag': ${e.message}")
@@ -227,17 +355,23 @@ class NarrationRepository @Inject constructor(
     private fun maxTokensFor(poi: PlaceOfInterest, hasWikiContext: Boolean): Int {
         val score = poi.fameScore
         return when {
-            hasWikiContext && score >= 2000 -> 4000  // World-famous + rich context
-            hasWikiContext && score >= 500  -> 2500  // Notable with good Wikipedia context
-            hasWikiContext                  -> 1500  // Has Wikipedia but lower fame
-            score >= 1000                   -> 2000  // Very famous, no Wikipedia tag
-            score >= 200                    -> 1200  // Moderately notable
-            else                            -> 800   // Simple/small place
+            hasWikiContext && score >= 2000 -> 4000
+            hasWikiContext && score >= 500  -> 2500
+            hasWikiContext                  -> 1500
+            score >= 1000                   -> 2000
+            score >= 200                    -> 1200
+            else                            -> 800
         }
     }
 
     companion object {
         private const val TAG = "NarrationRepository"
+        const val PREF_ANTHROPIC_KEY = "pref_api_key"   // same string value as MainFragment.PREF_API_KEY
+        const val PREF_NARRATION_PROVIDER = "pref_narration_provider"
+        const val PREF_NARRATION_MODEL = "pref_narration_model"
+        const val PREF_OPENAI_NARRATION_KEY = "pref_openai_narration_key"
+        const val NARRATION_PROVIDER_ANTHROPIC = "anthropic"
+        const val NARRATION_PROVIDER_OPENAI = "openai"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
         const val PREF_USER_PROMPT = "pref_user_prompt"
         const val DEFAULT_USER_PROMPT =
@@ -246,5 +380,20 @@ class NarrationRepository @Inject constructor(
             "{poi}\n\n" +
             "Please give me an engaging audio narration about this place. " +
             "Start naturally, as if you're right here with me, continuing our tour together."
+
+        val PREFERRED_OPENAI_MODELS = setOf(
+            "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1",
+            "gpt-4-turbo", "gpt-3.5-turbo", "o1-mini", "o4-mini",
+        )
+        val OPENAI_MODEL_PRICING = mapOf(
+            "gpt-4o-mini"   to "~\$0.001",
+            "gpt-4.1-mini"  to "~\$0.002",
+            "gpt-4o"        to "~\$0.013",
+            "gpt-4.1"       to "~\$0.010",
+            "gpt-4-turbo"   to "~\$0.014",
+            "gpt-3.5-turbo" to "~\$0.003",
+            "o1-mini"       to "~\$0.006",
+            "o4-mini"       to "~\$0.006",
+        )
     }
 }
