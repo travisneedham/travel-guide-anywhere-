@@ -109,7 +109,14 @@ class TourGuideService : LifecycleService() {
             ACTION_PAUSE -> pauseTour()
             ACTION_RESUME -> resumeTour()
             ACTION_SKIP -> skipCurrent()
-            ACTION_SET_SPEED -> ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 0.95f))
+            ACTION_SET_SPEED -> {
+                ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 0.95f))
+                if (tourState.value == TourState.PAUSED) {
+                    isSpeaking = true
+                    emitState(TourState.SPEAKING)
+                    updateNotification("Now: $savedTopicName")
+                }
+            }
             ACTION_REPLAY_POI -> handleReplayPoi(intent)
         }
 
