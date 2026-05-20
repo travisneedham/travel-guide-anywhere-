@@ -74,6 +74,12 @@ class MainFragment : Fragment() {
         setupNowPlayingActions()
         observeState()
         checkKokoroOnStartup()
+
+        // Show Places Covered immediately on launch if previous-session history exists.
+        if (TourGuideService.tourState.value == TourState.IDLE) {
+            mentionedPlacesStore.load()
+        }
+        updatePlacesButton(mentionedPlacesStore.allSorted())
     }
 
     // ── Mode toggle ────────────────────────────────────────────────────────────
