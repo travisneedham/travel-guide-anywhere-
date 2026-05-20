@@ -80,7 +80,7 @@
                 style="@style/Widget.Material3.Chip.Filter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="&#x1F44E;  Skip List" />
+                android:text="&#x1F44E;  Less Interesting" />
 
         </com.google.android.material.chip.ChipGroup>
     </HorizontalScrollView>
