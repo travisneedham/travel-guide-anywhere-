@@ -1,6 +1,7 @@
 package com.travelguide.anywhere
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -8,7 +9,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.commit
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.travelguide.anywhere.databinding.ActivityMainBinding
 import com.travelguide.anywhere.ui.main.MainFragment
 import dagger.hilt.android.AndroidEntryPoint
@@ -44,6 +47,24 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             supportFragmentManager.commit {
                 replace(R.id.fragment_container, MainFragment())
+            }
+            val crashFile = CrashReporter.crashFile(this)
+            if (crashFile.exists()) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Crash report found")
+                    .setMessage("The app crashed last session. Share the report?")
+                    .setPositiveButton("Share") { _, _ ->
+                        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", crashFile)
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(share, "Share crash report"))
+                        crashFile.delete()
+                    }
+                    .setNegativeButton("Dismiss") { _, _ -> crashFile.delete() }
+                    .show()
             }
         }
     }
