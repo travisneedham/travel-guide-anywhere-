@@ -111,7 +111,7 @@ class TourGuideService : LifecycleService() {
             ACTION_RESUME -> resumeTour()
             ACTION_SKIP -> skipCurrent()
             ACTION_SET_SPEED -> {
-                ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 0.95f))
+                ttsEngine?.setSpeed(intent.getFloatExtra(EXTRA_SPEECH_RATE, 1.0f))
                 if (tourState.value == TourState.PAUSED) {
                     isSpeaking = true
                     emitState(TourState.SPEAKING)
@@ -363,7 +363,7 @@ class TourGuideService : LifecycleService() {
                 prefetchedNarrationSummary = result.summary
                 prefetchedWikipediaUrl = buildWikiUrl(poi.tags["wikipedia"])
                 Log.i(TAG, "PREFETCH: STORED '${poi.name}' — total ${System.currentTimeMillis() - prefetchStart}ms")
-                val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
+                val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 1.0f)
                 ttsEngine?.prewarm(result.text, speechRate)
                 Log.d(TAG, "PREFETCH: prewarm complete for '${poi.name}'")
             } catch (e: CancellationException) {
@@ -396,7 +396,7 @@ class TourGuideService : LifecycleService() {
         emitCurrentTopic(topicName)
         updateNotification("Loading audio: $topicName", true)
 
-        val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 0.95f)
+        val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 1.0f)
         loadingProgress.value = -1f
         engine.speak(
             text = text,

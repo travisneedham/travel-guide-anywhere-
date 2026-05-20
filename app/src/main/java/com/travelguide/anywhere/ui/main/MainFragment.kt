@@ -159,7 +159,7 @@ class MainFragment : Fragment() {
         if (sliderInSpeedMode) return
         savedRadiusIndex = binding.rangeSlider.value.toInt()
         sliderInSpeedMode = true
-        val rate = prefs.getFloat(PREF_SPEECH_RATE, 0.95f).coerceIn(0.5f, 1.5f)
+        val rate = prefs.getFloat(PREF_SPEECH_RATE, 1.0f).coerceIn(0.5f, 1.5f)
         binding.rangeSlider.apply {
             valueFrom = 0.5f
             valueTo = 1.5f
