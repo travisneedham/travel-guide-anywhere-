@@ -93,6 +93,7 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
             isActive = true
         }
         sessionToken = session.sessionToken
+        sharedToken = session.sessionToken
         Log.i(TAG, "MediaSession created and active, token=$sessionToken")
 
         registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
@@ -149,6 +150,7 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
         }
         scope.cancel()
         session.release()
+        sharedToken = null
         Log.d(TAG, "MediaSession released, scope cancelled")
     }
 
@@ -373,5 +375,7 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
         private const val ROOT_ID = "root"
         private const val ITEM_ID = "tour_guide"
         private const val PREF_API_KEY = "pref_api_key"
+
+        @Volatile var sharedToken: android.support.v4.media.session.MediaSessionCompat.Token? = null
     }
 }

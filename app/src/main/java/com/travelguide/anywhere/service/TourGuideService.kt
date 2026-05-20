@@ -627,14 +627,47 @@ class TourGuideService : LifecycleService() {
         val tapIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        val pauseIntent = PendingIntent.getService(
+            this, 1, Intent(this, TourGuideService::class.java).apply { action = ACTION_PAUSE }, flags
+        )
+        val resumeIntent = PendingIntent.getService(
+            this, 2, Intent(this, TourGuideService::class.java).apply { action = ACTION_RESUME }, flags
+        )
+        val skipIntent = PendingIntent.getService(
+            this, 3, Intent(this, TourGuideService::class.java).apply { action = ACTION_SKIP }, flags
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Travel Guide Active")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_tour_guide)
             .setContentIntent(tapIntent)
             .setOngoing(true)
             .setProgress(0, 0, showProgress)
-            .build()
+
+        when (tourState.value) {
+            TourState.SPEAKING -> {
+                builder.addAction(R.drawable.ic_pause, "Pause", pauseIntent)
+                builder.addAction(R.drawable.ic_skip, "Skip", skipIntent)
+            }
+            TourState.PAUSED -> {
+                builder.addAction(R.drawable.ic_play, "Resume", resumeIntent)
+                builder.addAction(R.drawable.ic_skip, "Skip", skipIntent)
+            }
+            else -> Unit
+        }
+
+        val token = TourAutoMediaService.sharedToken
+        if (token != null) {
+            builder.setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(token)
+                    .setShowActionsInCompactView(0, 1)
+            )
+        }
+
+        return builder.build()
     }
 
     private fun updateNotification(text: String, showProgress: Boolean = false) {
