@@ -76,6 +76,13 @@ class ZoomableImageView @JvmOverloads constructor(
         scaleDetector.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { lastX = event.x; lastY = event.y }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // Re-anchor to the finger that's staying down so the next MOVE
+                // doesn't compute a huge delta from the old two-finger position.
+                val remaining = if (event.actionIndex == 0) 1 else 0
+                lastX = event.getX(remaining)
+                lastY = event.getY(remaining)
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (!scaleDetector.isInProgress && event.pointerCount == 1) {
                     tx += event.x - lastX

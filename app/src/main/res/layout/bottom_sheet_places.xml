@@ -102,8 +102,9 @@
         android:text="No places here yet."
         android:visibility="gone" />
 
-    <!-- List -->
-    <ScrollView
+    <!-- List — NestedScrollView lets BottomSheetBehavior know when the list
+         is mid-scroll so it won't hijack upward drags to collapse the sheet. -->
+    <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -117,6 +118,6 @@
             android:paddingEnd="16dp"
             android:paddingBottom="32dp" />
 
-    </ScrollView>
+    </androidx.core.widget.NestedScrollView>
 
 </LinearLayout>
