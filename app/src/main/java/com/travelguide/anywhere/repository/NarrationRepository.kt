@@ -329,12 +329,13 @@ class NarrationRepository @Inject constructor(
         val subject = if (poiSummary.isNotBlank()) "$poiName — $poiSummary" else poiName
 
         val summaryInstruction = "\n\nBefore your narration, format your response exactly like this:\n" +
-            "Line 1: a 3-6 word title in Title Case naming the thread you chose (e.g. \"Dallas Nightclub Owner\", " +
-            "\"Presidential Grief\", \"Ruby's Last Words\"). Do not use the original POI's name.\n" +
+            "Line 1: a 3-6 word title in Title Case naming the angle or aspect of this place you are exploring " +
+            "(e.g. \"The Sniper on the Sixth Floor\", \"Ruby's Desperate Act\", \"A City Frozen in Grief\", " +
+            "\"Warren Commission Secrets\"). Do not use the full location name as the entire title.\n" +
             "Line 2: blank.\n" +
-            "Line 3: one sentence describing the subject you chose to explore (e.g. \"The Dallas nightclub " +
-            "owner who silenced a nation.\" or \"How grief shaped a generation's relationship with the " +
-            "American presidency.\"). Do not start with a person's full name.\n" +
+            "Line 3: one sentence describing the specific angle or story you are telling about this place " +
+            "(e.g. \"The overlooked vantage point that changed everything.\" or " +
+            "\"How a small city became the center of a nation's grief.\"). Do not start with a person's full name.\n" +
             "Line 4: blank.\n" +
             "Then begin your narration."
 
@@ -520,11 +521,10 @@ class NarrationRepository @Inject constructor(
         const val PREF_ANTHROPIC_SPEND_USD = "pref_anthropic_spend_usd"
         const val PREF_DEEP_DIVE_PROMPT = "pref_deep_dive_prompt"
         const val DEFAULT_DEEP_DIVE_PROMPT =
-            "I just heard about {subject}. Keep rabbit-trailing. Pick the single most " +
-            "interesting unexplored thread connected to this topic — a related person, event, " +
-            "era, controversy, cultural context, or idea — and give me an engaging narration " +
-            "about it. Do not repeat any facts or stories already covered. Go wherever the " +
-            "narrative leads."
+            "I'm standing near {subject}. Tell me something new and fascinating about this " +
+            "specific place — a different story, person, era, detail, or angle you haven't " +
+            "covered yet. Stay focused on this location itself. Do not rabbit-trail to other " +
+            "topics or places. Do not repeat any facts or stories already covered."
         const val PREF_USER_PROMPT = "pref_user_prompt"
         const val DEFAULT_USER_PROMPT =
             "I'm currently at coordinates {location}. " +

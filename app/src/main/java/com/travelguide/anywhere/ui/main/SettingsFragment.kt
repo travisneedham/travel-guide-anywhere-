@@ -106,7 +106,6 @@ class SettingsFragment : Fragment() {
         loadVoiceSettings()
         loadInterestFilters()
         loadPrompts()
-        loadDeepDivePrompt()
         setupDiagnostics()
         setupExperiment()
     }
@@ -208,7 +207,6 @@ class SettingsFragment : Fragment() {
         binding.headerInterests.setOnClickListener { toggle(binding.bodyInterests, binding.indInterests) }
         binding.headerHistory.setOnClickListener { toggle(binding.bodyHistory, binding.indHistory) }
         binding.headerPrompts.setOnClickListener { toggle(binding.bodyPrompts, binding.indPrompts) }
-        binding.headerDeepDive.setOnClickListener { toggle(binding.bodyDeepDive, binding.indDeepDive) }
         binding.headerDiag.setOnClickListener { toggle(binding.bodyDiag, binding.indDiag) }
     }
 
@@ -578,15 +576,22 @@ class SettingsFragment : Fragment() {
             prefs.getString(NarrationRepository.PREF_USER_PROMPT, "")
                 ?.takeIf { it.isNotBlank() } ?: NarrationRepository.DEFAULT_USER_PROMPT
         )
+        binding.etDeepDivePrompt.setText(
+            prefs.getString(NarrationRepository.PREF_DEEP_DIVE_PROMPT, "")
+                ?.takeIf { it.isNotBlank() } ?: NarrationRepository.DEFAULT_DEEP_DIVE_PROMPT
+        )
         binding.btnRestoreSystem.setOnClickListener {
             binding.etSystemPrompt.setText(ClaudeApiService.SYSTEM_PROMPT)
         }
         binding.btnRestoreUser.setOnClickListener {
             binding.etUserPrompt.setText(NarrationRepository.DEFAULT_USER_PROMPT)
         }
+        binding.btnRestoreDeepDive.setOnClickListener {
+            binding.etDeepDivePrompt.setText(NarrationRepository.DEFAULT_DEEP_DIVE_PROMPT)
+        }
 
         // Prevent the outer ScrollView from swallowing vertical scroll in the prompt boxes.
-        listOf(binding.etSystemPrompt, binding.etUserPrompt).forEach { et ->
+        listOf(binding.etSystemPrompt, binding.etUserPrompt, binding.etDeepDivePrompt).forEach { et ->
             et.setOnTouchListener { v, event ->
                 v.parent.requestDisallowInterceptTouchEvent(true)
                 if (event.action == MotionEvent.ACTION_UP ||
@@ -595,23 +600,6 @@ class SettingsFragment : Fragment() {
                 }
                 false
             }
-        }
-    }
-
-    private fun loadDeepDivePrompt() {
-        binding.etDeepDivePrompt.setText(
-            prefs.getString(NarrationRepository.PREF_DEEP_DIVE_PROMPT, "")
-                ?.takeIf { it.isNotBlank() } ?: NarrationRepository.DEFAULT_DEEP_DIVE_PROMPT
-        )
-        binding.btnRestoreDeepDive.setOnClickListener {
-            binding.etDeepDivePrompt.setText(NarrationRepository.DEFAULT_DEEP_DIVE_PROMPT)
-        }
-        binding.etDeepDivePrompt.setOnTouchListener { v, event ->
-            v.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-                v.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
         }
     }
 

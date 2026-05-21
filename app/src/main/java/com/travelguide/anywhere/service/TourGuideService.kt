@@ -226,7 +226,6 @@ class TourGuideService : LifecycleService() {
                     name, deepDivePoiSummary, location, radiusMiles
                 )
                 pauseJob.join()
-                if (result.summary.isNotBlank()) deepDivePoiSummary = result.summary
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
                 isGenerating = false
