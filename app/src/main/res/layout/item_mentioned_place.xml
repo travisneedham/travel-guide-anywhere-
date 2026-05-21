@@ -41,6 +41,15 @@
                 android:textSize="12sp"
                 android:visibility="gone" />
 
+            <!-- Deep Dives heard about this place -->
+            <LinearLayout
+                android:id="@+id/ll_place_deep_dives"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="4dp"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/tv_place_time"
                 android:layout_width="wrap_content"

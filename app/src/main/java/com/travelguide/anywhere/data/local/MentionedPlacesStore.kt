@@ -26,6 +26,7 @@ class MentionedPlacesStore @Inject constructor(
         val wantToVisit: Boolean = false,
         val wikipediaUrl: String? = null,
         val tags: Map<String, String> = emptyMap(),
+        val deepDives: List<String> = emptyList(),
     )
 
     private val file: File get() = File(context.filesDir, "mentioned_places.json")
@@ -81,6 +82,15 @@ class MentionedPlacesStore @Inject constructor(
     fun commitAutoSkipped(osmId: String, name: String, lat: Double, lon: Double, summary: String, tags: Map<String, String> = emptyMap()) {
         if (_entries.none { it.osmId == osmId }) {
             _entries.add(Entry(osmId, name, lat, lon, System.currentTimeMillis(), summary, autoSkipped = true, tags = tags))
+            save()
+        }
+    }
+
+    fun appendDeepDive(osmId: String, title: String) {
+        if (title.isBlank()) return
+        val idx = _entries.indexOfFirst { it.osmId == osmId }
+        if (idx >= 0) {
+            _entries[idx] = _entries[idx].copy(deepDives = _entries[idx].deepDives + title)
             save()
         }
     }

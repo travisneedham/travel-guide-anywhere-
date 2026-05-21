@@ -65,8 +65,13 @@ class TourGuideService : LifecycleService() {
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
     @Volatile private var deepDivePoiSummary: String = ""
+    @Volatile private var deepDiveOriginalPoi: PlaceOfInterest? = null
+    @Volatile private var lastNarratedPoi: PlaceOfInterest? = null
+    @Volatile private var deepDiveCount: Int = 0
+    @Volatile private var currentDeepDiveTitle: String = ""
     @Volatile private var prefetchedDeepDiveResult: NarrationRepository.NarrationResult? = null
     private var deepDivePrefetchJob: Job? = null
+    private val deepDiveMaxIterations = 10
     // Incremented on every skip/stop so onDone callbacks from prior narrations are discarded.
     private var speakGeneration = 0
 
@@ -133,24 +138,38 @@ class TourGuideService : LifecycleService() {
 
     private fun toggleDeepDive() {
         if (isDeepDive.value) {
+            // User-initiated exit. Don't clear segments — the original card stays
+            // visible (with whatever's already in the list) until the next POI starts.
             isDeepDive.value = false
-            deepDivePoiName = ""
-            deepDivePoiSummary = ""
             deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
             prefetchedDeepDiveResult = null
         } else {
+            val originalPoi = currentNarrationPoi ?: lastNarratedPoi
+            if (originalPoi == null) {
+                Log.w(TAG, "Deep dive: no current/last POI — ignoring toggle")
+                return
+            }
             isDeepDive.value = true
-            deepDivePoiName = currentNarrationPoi?.name ?: savedTopicName
+            deepDiveOriginalPoi = originalPoi
+            deepDivePoiName = originalPoi.name
             deepDivePoiSummary = currentNarrationSummary
+            deepDiveCount = 0
+            currentDeepDiveTitle = ""
+            deepDiveSegments.value = emptyList()
+            // Discard any pending normal POI prefetch — we're branching into a dive.
+            prefetchJob?.cancel(); prefetchJob = null
+            prefetchedNarration = null
+            prefetchedNarrationCommit = null
+            prefetchedNarrationSummary = ""
+            prefetchedWikipediaUrl = null
             if (isSpeaking) {
-                // Cancel normal prefetch and start warming the first deep dive narration
-                // so it's ready the moment the current narration finishes.
-                prefetchJob?.cancel(); prefetchJob = null
-                prefetchedNarration = null
-                prefetchedNarrationCommit = null
-                prefetchedNarrationSummary = ""
-                prefetchedWikipediaUrl = null
+                // Mid-narration: pre-warm so the first dive is ready when current ends.
                 startDeepDivePrefetch()
+            } else {
+                // Between narrations: cancel any in-flight next-POI fetch and start
+                // the first dive on the just-finished subject immediately.
+                generationJob?.cancel()
+                startDeepDiveCycle()
             }
         }
         Log.i(TAG, "Deep dive toggled: ${isDeepDive.value}, subject='$deepDivePoiName'")
@@ -173,6 +192,17 @@ class TourGuideService : LifecycleService() {
         }
     }
 
+    private fun clearDeepDiveContext() {
+        deepDiveOriginalPoi = null
+        deepDivePoiName = ""
+        deepDivePoiSummary = ""
+        deepDiveCount = 0
+        currentDeepDiveTitle = ""
+        deepDiveSegments.value = emptyList()
+        deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
+        prefetchedDeepDiveResult = null
+    }
+
     private fun startDeepDiveCycle() {
         // Cancel any background prefetch — generation happens inside this cycle now.
         deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
@@ -183,6 +213,7 @@ class TourGuideService : LifecycleService() {
             return
         }
         val name = deepDivePoiName
+        val originalPoi = deepDiveOriginalPoi
         generationJob = lifecycleScope.launch {
             try {
                 isGenerating = true
@@ -199,7 +230,18 @@ class TourGuideService : LifecycleService() {
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
                 isGenerating = false
-                val topicName = result.summary.ifBlank { name }
+                deepDiveCount += 1
+                val title = result.title.ifBlank { result.summary.take(40) }
+                currentDeepDiveTitle = title
+                if (title.isNotBlank()) {
+                    deepDiveSegments.value = deepDiveSegments.value + title
+                }
+                // 10-dive cap: turn the mode off on the final dive so the next narration
+                // returns to the normal POI tour. The 10th dive still plays in full.
+                if (deepDiveCount >= deepDiveMaxIterations) {
+                    isDeepDive.value = false
+                }
+                val topicName = originalPoi?.name ?: name
                 speak(result.text, topicName)
             } catch (e: CancellationException) {
                 isGenerating = false
@@ -208,8 +250,7 @@ class TourGuideService : LifecycleService() {
                 Log.e(TAG, "Error in deep dive cycle", e)
                 isGenerating = false
                 isDeepDive.value = false
-                deepDivePoiName = ""
-                deepDivePoiSummary = ""
+                clearDeepDiveContext()
                 lastLocation?.let { onLocationUpdate(it) }
             }
         }
@@ -484,6 +525,7 @@ class TourGuideService : LifecycleService() {
         savedTopicName = topicName
         speakStartTime = System.currentTimeMillis()
         isSpeaking = true
+        currentNarrationPoi?.let { lastNarratedPoi = it }
         emitState(TourState.LOADING_AUDIO)
         emitCurrentTopic(topicName)
         updateNotification("Loading audio: $topicName", true)
@@ -498,9 +540,16 @@ class TourGuideService : LifecycleService() {
                 loadingProgress.value = -1f
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
-                if (!isReplayMode && !isDeepDive.value) {
-                    Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
-                    lastLocation?.let { prefetchNextNarration(it) }
+                when {
+                    isReplayMode -> { /* no prefetch */ }
+                    isDeepDive.value && deepDiveCount < deepDiveMaxIterations -> {
+                        Log.i(TAG, "TTS onStart '$topicName' — triggering deep dive prefetch")
+                        startDeepDivePrefetch()
+                    }
+                    !isDeepDive.value -> {
+                        Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
+                        lastLocation?.let { prefetchNextNarration(it) }
+                    }
                 }
             },
             onEnqueued = {},
@@ -514,15 +563,26 @@ class TourGuideService : LifecycleService() {
                 currentNarrationPoi = null
                 isSpeaking = false
                 Log.i(TAG, "TTS onDone '${poi?.name}' — played ${duration}ms, prefetchReady=${prefetchedNarration != null}")
+                val finishedDiveTitle = currentDeepDiveTitle.also { currentDeepDiveTitle = "" }
+                val finishedDiveOriginalPoi = deepDiveOriginalPoi
                 lifecycleScope.launch {
-                    emitCurrentTopic("")
-                    currentPoiMeta.value = CurrentPoiMeta()
+                    // Keep the original-POI card visible during deep dive transitions.
+                    val stayInDeepDive = isDeepDive.value
+                    if (!stayInDeepDive) {
+                        emitCurrentTopic("")
+                        currentPoiMeta.value = CurrentPoiMeta()
+                    }
                     if (poi != null && duration >= 10_000L) {
                         mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary, wikiUrl, poi.tags)
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
                     if (duration >= 10_000L) {
                         commit?.invoke()
+                    }
+                    // Persist the just-finished dive's title onto the original POI's entry.
+                    if (finishedDiveTitle.isNotBlank() && duration >= 10_000L && finishedDiveOriginalPoi != null) {
+                        mentionedPlacesStore.appendDeepDive(finishedDiveOriginalPoi.osmId, finishedDiveTitle)
+                        mentionedPlaces.value = mentionedPlacesStore.recentFive()
                     }
 
                     if (isReplayMode) {
@@ -535,6 +595,7 @@ class TourGuideService : LifecycleService() {
                         if (deepDivePoiName.isBlank() && poi != null) {
                             deepDivePoiName = poi.name
                             deepDivePoiSummary = summary
+                            if (deepDiveOriginalPoi == null) deepDiveOriginalPoi = poi
                         }
                         prefetchJob?.cancel(); prefetchJob = null
                         prefetchedNarration = null
@@ -544,6 +605,11 @@ class TourGuideService : LifecycleService() {
                         startDeepDiveCycle()
                         return@launch
                     }
+
+                    // Leaving deep dive context — clear the segments list so the next
+                    // POI's card starts clean. If toggled off mid-dive, the list stays
+                    // visible until this point (the new POI is about to take over).
+                    clearDeepDiveContext()
 
                     val prefetched = prefetchedNarration.also { prefetchedNarration = null }
                     val nextCommit = prefetchedNarrationCommit.also { prefetchedNarrationCommit = null }
@@ -664,6 +730,13 @@ class TourGuideService : LifecycleService() {
         currentPoiMeta.value = CurrentPoiMeta()
 
         if (isDeepDive.value) {
+            // Roll back the in-progress dive: it wasn't actually heard, so the
+            // numbered list and count should not reflect it.
+            if (currentDeepDiveTitle.isNotBlank()) {
+                deepDiveSegments.value = deepDiveSegments.value.dropLast(1)
+                deepDiveCount = (deepDiveCount - 1).coerceAtLeast(0)
+                currentDeepDiveTitle = ""
+            }
             deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
             prefetchedDeepDiveResult = null
             startDeepDiveCycle()
@@ -705,10 +778,8 @@ class TourGuideService : LifecycleService() {
         currentNarrationWikipediaUrl = null
         isReplayMode = false
         isDeepDive.value = false
-        deepDivePoiName = ""
-        deepDivePoiSummary = ""
-        deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
-        prefetchedDeepDiveResult = null
+        clearDeepDiveContext()
+        lastNarratedPoi = null
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
@@ -885,6 +956,7 @@ class TourGuideService : LifecycleService() {
         val currentPoiMeta = MutableStateFlow(CurrentPoiMeta())
         val loadingProgress = MutableStateFlow(-1f)
         val isDeepDive = MutableStateFlow(false)
+        val deepDiveSegments = MutableStateFlow<List<String>>(emptyList())
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }

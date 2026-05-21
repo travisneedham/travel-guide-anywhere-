@@ -120,6 +120,24 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
                 tvSummary.visibility = View.VISIBLE
             }
 
+            // Deep dives heard about this place
+            val llDeepDives = row.findViewById<LinearLayout>(R.id.ll_place_deep_dives)
+            llDeepDives.removeAllViews()
+            if (entry.deepDives.isNotEmpty()) {
+                llDeepDives.visibility = View.VISIBLE
+                entry.deepDives.forEachIndexed { i, title ->
+                    val tv = TextView(ctx).apply {
+                        text = "${i + 1}. $title"
+                        textSize = 12f
+                        setTextColor(colorSecondary)
+                        setPadding(0, 2, 0, 2)
+                    }
+                    llDeepDives.addView(tv)
+                }
+            } else {
+                llDeepDives.visibility = View.GONE
+            }
+
             tvTime.text = sdf.format(Date(entry.mentionedAt))
 
             // Saved indicator in name row

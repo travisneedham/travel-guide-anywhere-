@@ -324,6 +324,9 @@ class MainFragment : Fragment() {
                 launch { TourGuideService.isDeepDive.collect { active ->
                     updateDeepDiveButton(active)
                 }}
+                launch { TourGuideService.deepDiveSegments.collect { segments ->
+                    renderDeepDiveList(segments)
+                }}
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     TourGuideService.errorMessage.value = null  // consume — prevents re-toast on lifecycle restart
@@ -465,6 +468,30 @@ class MainFragment : Fragment() {
         } else {
             binding.tvCurrentTopic.visibility = View.GONE
             binding.layoutPoiActions.visibility = View.GONE
+            binding.llDeepDiveList.visibility = View.GONE
+        }
+    }
+
+    private fun renderDeepDiveList(segments: List<String>) {
+        val container = binding.llDeepDiveList
+        container.removeAllViews()
+        if (segments.isEmpty()) {
+            container.visibility = View.GONE
+            return
+        }
+        container.visibility = View.VISIBLE
+        val ctx = requireContext()
+        val accentColor = ctx.getColor(R.color.accent)
+        val secondaryColor = ctx.getColor(R.color.text_secondary)
+        val lastIndex = segments.size - 1
+        segments.forEachIndexed { idx, title ->
+            val tv = android.widget.TextView(ctx).apply {
+                text = "${idx + 1}. $title"
+                textSize = 14f
+                setTextColor(if (idx == lastIndex) accentColor else secondaryColor)
+                setPadding(0, 6, 0, 6)
+            }
+            container.addView(tv)
         }
     }
 

@@ -34,6 +34,7 @@ class NarrationRepository @Inject constructor(
     data class NarrationResult(
         val text: String,
         val summary: String = "",
+        val title: String = "",
         /** Call this alongside mentionedPlacesStore.commitWithSummary() — never before. */
         val commitHistory: () -> Unit,
     )
@@ -327,11 +328,15 @@ class NarrationRepository @Inject constructor(
             ?.takeIf { it.isNotBlank() } ?: DEFAULT_DEEP_DIVE_PROMPT
         val subject = if (poiSummary.isNotBlank()) "$poiName — $poiSummary" else poiName
 
-        val summaryInstruction = "\n\nBefore your narration, write one sentence on the very " +
-            "first line describing the specific subject you chose to explore — for example: " +
-            "\"The Dallas nightclub owner who silenced a nation\" or \"How grief shaped a " +
-            "generation's relationship with the American presidency.\" Do not start with a " +
-            "person's full name. Follow it with exactly one blank line, then begin your narration."
+        val summaryInstruction = "\n\nBefore your narration, format your response exactly like this:\n" +
+            "Line 1: a 2-3 word title in Title Case naming the thread you chose (e.g. \"Dallas Nightclub Owner\", " +
+            "\"Presidential Grief\", \"Ruby's Last Words\"). Do not use the original POI's name.\n" +
+            "Line 2: blank.\n" +
+            "Line 3: one sentence describing the subject you chose to explore (e.g. \"The Dallas nightclub " +
+            "owner who silenced a nation.\" or \"How grief shaped a generation's relationship with the " +
+            "American presidency.\"). Do not start with a person's full name.\n" +
+            "Line 4: blank.\n" +
+            "Then begin your narration."
 
         val userMessageText = template.replace("{subject}", subject) + summaryInstruction
 
@@ -357,8 +362,8 @@ class NarrationRepository @Inject constructor(
                 try {
                     val text = callOpenAiChat(key, model, systemPrompt, history, userMessageText, 1500)
                     if (text.isNotBlank()) {
-                        val (summary, narrationText) = parseSummaryAndNarration(text)
-                        return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                        val (title, summary, narrationText) = parseDeepDiveResponse(text)
+                        return NarrationResult(text = narrationText, summary = summary, title = title, commitHistory = {
                             historyStore.append(userMessage = userMessageText, assistantMessage = text,
                                 lat = location.latitude, lon = location.longitude)
                         })
@@ -395,8 +400,8 @@ class NarrationRepository @Inject constructor(
                 }
                 val text = response.text
                 if (text.isNotBlank()) {
-                    val (summary, narrationText) = parseSummaryAndNarration(text)
-                    return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                    val (title, summary, narrationText) = parseDeepDiveResponse(text)
+                    return NarrationResult(text = narrationText, summary = summary, title = title, commitHistory = {
                         historyStore.append(userMessage = userMessageText, assistantMessage = text,
                             lat = location.latitude, lon = location.longitude)
                     })
@@ -433,6 +438,22 @@ class NarrationRepository @Inject constructor(
             }
         }
         return "" to text
+    }
+
+    private fun parseDeepDiveResponse(text: String): Triple<String, String, String> {
+        // Expect: title \n\n summary \n\n narration
+        val parts = text.trim().split(Regex("\\n\\s*\\n"), limit = 3)
+        if (parts.size == 3) {
+            val title = parts[0].trim()
+            val summary = parts[1].trim()
+            val narration = parts[2].trim()
+            if (title.length in 1..40 && summary.isNotBlank() && narration.length > summary.length) {
+                return Triple(title, summary, narration)
+            }
+        }
+        // Fallback: try the 2-line (summary, narration) layout used by regular narrations.
+        val (summary, narration) = parseSummaryAndNarration(text)
+        return Triple("", summary, narration)
     }
 
     private suspend fun fetchWikipediaIntro(wikipediaTag: String): String? = withContext(Dispatchers.IO) {

@@ -299,6 +299,15 @@
                     tools:text="Narrating: Lincoln Memorial"
                     tools:visibility="visible" />
 
+                <!-- Deep Dive list (numbered titles built up during deep dive mode) -->
+                <LinearLayout
+                    android:id="@+id/ll_deep_dive_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="8dp"
+                    android:visibility="gone" />
+
                 <!-- Now-playing action bar: navigate, wikipedia, want-to-visit, thumbs-down -->
                 <LinearLayout
                     android:id="@+id/layout_poi_actions"
