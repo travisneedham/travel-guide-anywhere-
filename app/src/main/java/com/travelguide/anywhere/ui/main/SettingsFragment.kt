@@ -222,6 +222,7 @@ class SettingsFragment : Fragment() {
         binding.rgNarrationProvider.setOnCheckedChangeListener { _, _ -> applyNarrationProviderVisibility() }
 
         setupAnthropicModels()
+        loadAnthropicSpend()
 
         binding.etOpenaiNarrationKey.setText(prefs.getString(NarrationRepository.PREF_OPENAI_NARRATION_KEY, ""))
         binding.btnFetchOpenaiNarration.setOnClickListener { fetchOpenAiNarrationData() }
@@ -229,6 +230,15 @@ class SettingsFragment : Fragment() {
         val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
         if (binding.rbNarrationOpenai.isChecked && savedModel.isNotBlank()) {
             populateOpenAiModelDropdown(listOf(savedModel), savedModel)
+        }
+    }
+
+    private fun loadAnthropicSpend() {
+        val spend = prefs.getFloat(NarrationRepository.PREF_ANTHROPIC_SPEND_USD, 0f)
+        binding.tvAnthropicSpend.text = "Estimated spend: ${"$%.4f".format(spend)}"
+        binding.btnResetAnthropicSpend.setOnClickListener {
+            prefs.edit().putFloat(NarrationRepository.PREF_ANTHROPIC_SPEND_USD, 0f).apply()
+            binding.tvAnthropicSpend.text = "Estimated spend: $0.0000"
         }
     }
 

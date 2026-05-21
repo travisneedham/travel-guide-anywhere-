@@ -139,6 +139,13 @@ class NarrationRepository @Inject constructor(
         repeat(3) { attempt ->
             try {
                 val response = claudeApi.createMessage(apiKey = anthropicKey, request = request)
+                response.usage?.let { usage ->
+                    val cost = computeCostUsd(anthropicModel, usage.inputTokens, usage.outputTokens)
+                    prefs.edit().putFloat(
+                        PREF_ANTHROPIC_SPEND_USD,
+                        prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
+                    ).apply()
+                }
                 val text = response.text
                 if (text.isNotBlank()) {
                     val (summary, narrationText) = parseSummaryAndNarration(text)
@@ -192,8 +199,15 @@ class NarrationRepository @Inject constructor(
             maxTokens = 5,
         )
         return try {
-            claudeApi.createMessage(apiKey = apiKey, request = request)
-                .text.trim().startsWith("YES", ignoreCase = true)
+            val response = claudeApi.createMessage(apiKey = apiKey, request = request)
+            response.usage?.let { usage ->
+                val cost = computeCostUsd("claude-haiku-4-5-20251001", usage.inputTokens, usage.outputTokens)
+                prefs.edit().putFloat(
+                    PREF_ANTHROPIC_SPEND_USD,
+                    prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
+                ).apply()
+            }
+            response.text.trim().startsWith("YES", ignoreCase = true)
         } catch (e: Exception) {
             Log.w(TAG, "Similarity check failed for '$poiName': ${e.message}")
             false
@@ -300,6 +314,15 @@ class NarrationRepository @Inject constructor(
             ?: throw Exception("No content in OpenAI response")
     }
 
+    private fun computeCostUsd(model: String, inputTokens: Int, outputTokens: Int): Float {
+        val (inputPer1M, outputPer1M) = when {
+            model.contains("opus")   -> 15.00f to 75.00f
+            model.contains("sonnet") ->  3.00f to 15.00f
+            else                     ->  0.80f to  4.00f
+        }
+        return (inputTokens * inputPer1M + outputTokens * outputPer1M) / 1_000_000f
+    }
+
     private fun parseSummaryAndNarration(text: String): Pair<String, String> {
         val idx = text.indexOf("\n\n")
         if (idx in 1..300) {
@@ -373,6 +396,7 @@ class NarrationRepository @Inject constructor(
         const val NARRATION_PROVIDER_ANTHROPIC = "anthropic"
         const val NARRATION_PROVIDER_OPENAI = "openai"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
+        const val PREF_ANTHROPIC_SPEND_USD = "pref_anthropic_spend_usd"
         const val PREF_USER_PROMPT = "pref_user_prompt"
         const val DEFAULT_USER_PROMPT =
             "I'm currently at coordinates {location}. " +
