@@ -859,7 +859,7 @@
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Clear Session History"
+                    android:text="Clear Places Covered"
                     android:textColor="@color/stop_color" />
 
 
