@@ -65,6 +65,8 @@ class TourGuideService : LifecycleService() {
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
     @Volatile private var deepDivePoiSummary: String = ""
+    @Volatile private var prefetchedDeepDiveResult: NarrationRepository.NarrationResult? = null
+    private var deepDivePrefetchJob: Job? = null
     // Incremented on every skip/stop so onDone callbacks from prior narrations are discarded.
     private var speakGeneration = 0
 
@@ -134,15 +136,55 @@ class TourGuideService : LifecycleService() {
             isDeepDive.value = false
             deepDivePoiName = ""
             deepDivePoiSummary = ""
+            deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
+            prefetchedDeepDiveResult = null
         } else {
             isDeepDive.value = true
             deepDivePoiName = currentNarrationPoi?.name ?: savedTopicName
             deepDivePoiSummary = currentNarrationSummary
+            if (isSpeaking) {
+                // Cancel normal prefetch and start warming the first deep dive narration
+                // so it's ready the moment the current narration finishes.
+                prefetchJob?.cancel(); prefetchJob = null
+                prefetchedNarration = null
+                prefetchedNarrationCommit = null
+                prefetchedNarrationSummary = ""
+                prefetchedWikipediaUrl = null
+                startDeepDivePrefetch()
+            }
         }
         Log.i(TAG, "Deep dive toggled: ${isDeepDive.value}, subject='$deepDivePoiName'")
     }
 
+    private fun startDeepDivePrefetch() {
+        val location = lastLocation ?: return
+        val name = deepDivePoiName
+        val summary = deepDivePoiSummary
+        deepDivePrefetchJob?.cancel()
+        deepDivePrefetchJob = lifecycleScope.launch {
+            try {
+                val result = narrationRepository.generateDeepDiveNarration(name, summary, location, radiusMiles)
+                prefetchedDeepDiveResult = result
+                Log.i(TAG, "Deep dive prefetch complete for '$name'")
+            } catch (_: CancellationException) { throw CancellationException() }
+            catch (e: Exception) {
+                Log.e(TAG, "Deep dive prefetch failed", e)
+            }
+        }
+    }
+
     private fun startDeepDiveCycle() {
+        // Cancel any background prefetch — we're about to speak or generate right now.
+        deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
+        val ready = prefetchedDeepDiveResult.also { prefetchedDeepDiveResult = null }
+        if (ready != null) {
+            if (ready.summary.isNotBlank()) deepDivePoiSummary = ready.summary
+            currentNarrationCommit = ready.commitHistory
+            currentNarrationSummary = ready.summary
+            val topicName = ready.summary.ifBlank { deepDivePoiName }
+            speak(ready.text, topicName)
+            return
+        }
         val location = lastLocation ?: run {
             Log.w(TAG, "Deep dive: no location — exiting mode")
             isDeepDive.value = false
@@ -503,9 +545,6 @@ class TourGuideService : LifecycleService() {
                         prefetchedNarrationCommit = null
                         prefetchedNarrationSummary = ""
                         prefetchedWikipediaUrl = null
-                        isGenerating = true
-                        delay(3_000L)
-                        isGenerating = false
                         startDeepDiveCycle()
                         return@launch
                     }
@@ -629,6 +668,8 @@ class TourGuideService : LifecycleService() {
         currentPoiMeta.value = CurrentPoiMeta()
 
         if (isDeepDive.value) {
+            deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
+            prefetchedDeepDiveResult = null
             startDeepDiveCycle()
             return
         }
@@ -670,6 +711,8 @@ class TourGuideService : LifecycleService() {
         isDeepDive.value = false
         deepDivePoiName = ""
         deepDivePoiSummary = ""
+        deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
+        prefetchedDeepDiveResult = null
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
