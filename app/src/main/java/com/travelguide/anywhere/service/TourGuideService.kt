@@ -174,17 +174,9 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun startDeepDiveCycle() {
-        // Cancel any background prefetch — we're about to speak or generate right now.
+        // Cancel any background prefetch — generation happens inside this cycle now.
         deepDivePrefetchJob?.cancel(); deepDivePrefetchJob = null
         val ready = prefetchedDeepDiveResult.also { prefetchedDeepDiveResult = null }
-        if (ready != null) {
-            if (ready.summary.isNotBlank()) deepDivePoiSummary = ready.summary
-            currentNarrationCommit = ready.commitHistory
-            currentNarrationSummary = ready.summary
-            val topicName = ready.summary.ifBlank { deepDivePoiName }
-            speak(ready.text, topicName)
-            return
-        }
         val location = lastLocation ?: run {
             Log.w(TAG, "Deep dive: no location — exiting mode")
             isDeepDive.value = false
@@ -196,9 +188,13 @@ class TourGuideService : LifecycleService() {
                 isGenerating = true
                 emitState(TourState.GENERATING)
                 updateNotification("Deep dive: $name…", true)
-                val result = narrationRepository.generateDeepDiveNarration(
+                // 3-second silence and generation run in parallel; audio only plays
+                // once both are done so there's always a pause between narrations.
+                val pauseJob = launch { delay(3_000L) }
+                val result = ready ?: narrationRepository.generateDeepDiveNarration(
                     name, deepDivePoiSummary, location, radiusMiles
                 )
+                pauseJob.join()
                 if (result.summary.isNotBlank()) deepDivePoiSummary = result.summary
                 currentNarrationCommit = result.commitHistory
                 currentNarrationSummary = result.summary
