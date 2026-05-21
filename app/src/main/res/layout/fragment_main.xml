@@ -355,39 +355,56 @@
 
                 </LinearLayout>
 
-                <!-- Pause / Skip controls — visible only while speaking or paused -->
+                <!-- Pause / Skip / Deep Dive controls — visible only while tour is active -->
                 <LinearLayout
                     android:id="@+id/layout_playback_controls"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
                     android:layout_marginTop="16dp"
                     android:visibility="gone"
                     tools:visibility="visible">
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_pause"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:maxLines="1"
-                        android:text="@string/btn_pause"
-                        app:icon="@drawable/ic_pause"
-                        app:iconGravity="textStart"
-                        app:iconSize="18dp"
-                        app:iconPadding="6dp" />
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_pause"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:maxLines="1"
+                            android:text="@string/btn_pause"
+                            app:icon="@drawable/ic_pause"
+                            app:iconGravity="textStart"
+                            app:iconSize="18dp"
+                            app:iconPadding="6dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_skip"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="@string/btn_skip"
+                            app:icon="@drawable/ic_skip"
+                            app:iconGravity="textStart" />
+
+                    </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_skip"
+                        android:id="@+id/btn_deep_dive"
                         style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/btn_skip"
-                        app:icon="@drawable/ic_skip"
-                        app:iconGravity="textStart" />
+                        android:layout_marginTop="8dp"
+                        android:text="Deep Dive"
+                        app:strokeColor="@color/accent"
+                        app:cornerRadius="8dp" />
 
                 </LinearLayout>
             </LinearLayout>

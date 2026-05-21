@@ -63,6 +63,8 @@ class TourGuideService : LifecycleService() {
     private var isGenerating = false
     private var isReplayMode = false
     private var savedTopicName = ""
+    @Volatile private var deepDivePoiName: String = ""
+    @Volatile private var deepDivePoiSummary: String = ""
     // Incremented on every skip/stop so onDone callbacks from prior narrations are discarded.
     private var speakGeneration = 0
 
@@ -121,9 +123,58 @@ class TourGuideService : LifecycleService() {
                 }
             }
             ACTION_REPLAY_POI -> handleReplayPoi(intent)
+            ACTION_TOGGLE_DEEP_DIVE -> toggleDeepDive()
         }
 
         return START_STICKY
+    }
+
+    private fun toggleDeepDive() {
+        if (isDeepDive.value) {
+            isDeepDive.value = false
+            deepDivePoiName = ""
+            deepDivePoiSummary = ""
+        } else {
+            isDeepDive.value = true
+            deepDivePoiName = currentNarrationPoi?.name ?: savedTopicName
+            deepDivePoiSummary = currentNarrationSummary
+        }
+        Log.i(TAG, "Deep dive toggled: ${isDeepDive.value}, subject='$deepDivePoiName'")
+    }
+
+    private fun startDeepDiveCycle() {
+        val location = lastLocation ?: run {
+            Log.w(TAG, "Deep dive: no location — exiting mode")
+            isDeepDive.value = false
+            return
+        }
+        val name = deepDivePoiName
+        generationJob = lifecycleScope.launch {
+            try {
+                isGenerating = true
+                emitState(TourState.GENERATING)
+                updateNotification("Deep dive: $name…", true)
+                val result = narrationRepository.generateDeepDiveNarration(
+                    name, deepDivePoiSummary, location, radiusMiles
+                )
+                if (result.summary.isNotBlank()) deepDivePoiSummary = result.summary
+                currentNarrationCommit = result.commitHistory
+                currentNarrationSummary = result.summary
+                isGenerating = false
+                val topicName = result.summary.ifBlank { name }
+                speak(result.text, topicName)
+            } catch (e: CancellationException) {
+                isGenerating = false
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in deep dive cycle", e)
+                isGenerating = false
+                isDeepDive.value = false
+                deepDivePoiName = ""
+                deepDivePoiSummary = ""
+                lastLocation?.let { onLocationUpdate(it) }
+            }
+        }
     }
 
     private fun handleReplayPoi(intent: Intent) {
@@ -409,7 +460,7 @@ class TourGuideService : LifecycleService() {
                 loadingProgress.value = -1f
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
-                if (!isReplayMode) {
+                if (!isReplayMode && !isDeepDive.value) {
                     Log.i(TAG, "TTS onStart '$topicName' — triggering prefetch")
                     lastLocation?.let { prefetchNextNarration(it) }
                 }
@@ -430,13 +481,32 @@ class TourGuideService : LifecycleService() {
                     currentPoiMeta.value = CurrentPoiMeta()
                     if (poi != null && duration >= 10_000L) {
                         mentionedPlacesStore.commitWithSummary(poi.osmId, poi.name, poi.lat, poi.lon, summary, wikiUrl, poi.tags)
-                        commit?.invoke()
                         mentionedPlaces.value = mentionedPlacesStore.recentFive()
+                    }
+                    if (duration >= 10_000L) {
+                        commit?.invoke()
                     }
 
                     if (isReplayMode) {
                         isReplayMode = false
                         stopTour()
+                        return@launch
+                    }
+
+                    if (isDeepDive.value) {
+                        if (deepDivePoiName.isBlank() && poi != null) {
+                            deepDivePoiName = poi.name
+                            deepDivePoiSummary = summary
+                        }
+                        prefetchJob?.cancel(); prefetchJob = null
+                        prefetchedNarration = null
+                        prefetchedNarrationCommit = null
+                        prefetchedNarrationSummary = ""
+                        prefetchedWikipediaUrl = null
+                        isGenerating = true
+                        delay(3_000L)
+                        isGenerating = false
+                        startDeepDiveCycle()
                         return@launch
                     }
 
@@ -558,6 +628,13 @@ class TourGuideService : LifecycleService() {
         emitCurrentPoiImage(null)
         currentPoiMeta.value = CurrentPoiMeta()
 
+        if (isDeepDive.value) {
+            isDeepDive.value = false
+            deepDivePoiName = ""
+            deepDivePoiSummary = ""
+            // fall through to normal skip → next POI
+        }
+
         if (isReplayMode) {
             isReplayMode = false
             stopTour()
@@ -592,6 +669,9 @@ class TourGuideService : LifecycleService() {
         currentNarrationSummary = ""
         currentNarrationWikipediaUrl = null
         isReplayMode = false
+        isDeepDive.value = false
+        deepDivePoiName = ""
+        deepDivePoiSummary = ""
         generationJob?.cancel()
         prefetchJob?.cancel(); prefetchJob = null
         imageFetchJob?.cancel(); imageFetchJob = null
@@ -729,6 +809,7 @@ class TourGuideService : LifecycleService() {
         const val ACTION_RESUME = "ACTION_RESUME"
         const val ACTION_SKIP = "ACTION_SKIP"
         const val ACTION_REPLAY_POI = "ACTION_REPLAY_POI"
+        const val ACTION_TOGGLE_DEEP_DIVE = "ACTION_TOGGLE_DEEP_DIVE"
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val EXTRA_FAMOUS_MODE = "EXTRA_FAMOUS_MODE"
@@ -766,6 +847,7 @@ class TourGuideService : LifecycleService() {
         val currentPoiImage = MutableStateFlow<String?>(null)
         val currentPoiMeta = MutableStateFlow(CurrentPoiMeta())
         val loadingProgress = MutableStateFlow(-1f)
+        val isDeepDive = MutableStateFlow(false)
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }

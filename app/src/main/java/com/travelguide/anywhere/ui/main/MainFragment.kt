@@ -220,6 +220,7 @@ class MainFragment : Fragment() {
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
         binding.btnPause.setOnClickListener { viewModel.pauseOrResume() }
         binding.btnSkip.setOnClickListener { viewModel.skip() }
+        binding.btnDeepDive.setOnClickListener { viewModel.toggleDeepDive() }
         binding.btnSettings.setOnClickListener {
             parentFragmentManager.commit {
                 replace(R.id.fragment_container, SettingsFragment())
@@ -320,6 +321,9 @@ class MainFragment : Fragment() {
                 launch { TourGuideService.currentPoiMeta.collect { meta ->
                     binding.btnPoiWikipedia.visibility = if (meta.wikipediaUrl != null) View.VISIBLE else View.GONE
                 } }
+                launch { TourGuideService.isDeepDive.collect { active ->
+                    updateDeepDiveButton(active)
+                }}
                 launch { viewModel.errorMessage.collect { it?.let { msg ->
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     TourGuideService.errorMessage.value = null  // consume — prevents re-toast on lifecycle restart
@@ -384,6 +388,7 @@ class MainFragment : Fragment() {
 
         val showControls = state == TourState.SPEAKING || state == TourState.PAUSED
         binding.layoutPlaybackControls.visibility = if (showControls) View.VISIBLE else View.GONE
+        binding.btnDeepDive.visibility = if (isActive) View.VISIBLE else View.GONE
 
         if (state == TourState.PAUSED) {
             binding.btnPause.text = getString(R.string.btn_resume)
@@ -533,6 +538,20 @@ class MainFragment : Fragment() {
         binding.btnPoiWantToVisit.imageTintList = android.content.res.ColorStateList.valueOf(if (wantToVisit) accentColor else secondaryColor)
         binding.btnPoiThumbsDown.imageTintList = android.content.res.ColorStateList.valueOf(if (thumbsDown) redColor else secondaryColor)
         binding.btnPoiThumbsDown.alpha = if (thumbsDown) 1f else 0.5f
+    }
+
+    private fun updateDeepDiveButton(active: Boolean) {
+        val ctx = context ?: return
+        val accentColor = ctx.getColor(R.color.accent)
+        binding.btnDeepDive.apply {
+            text = if (active) "Deep Diving…" else "Deep Dive"
+            backgroundTintList = android.content.res.ColorStateList.valueOf(
+                if (active) accentColor else android.graphics.Color.TRANSPARENT
+            )
+            setTextColor(
+                if (active) android.graphics.Color.WHITE else accentColor
+            )
+        }
     }
 
     private fun updatePlacesButton(entries: List<MentionedPlacesStore.Entry>) {

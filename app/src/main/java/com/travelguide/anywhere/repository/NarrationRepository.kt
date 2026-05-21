@@ -314,6 +314,106 @@ class NarrationRepository @Inject constructor(
             ?: throw Exception("No content in OpenAI response")
     }
 
+    suspend fun generateDeepDiveNarration(
+        poiName: String,
+        poiSummary: String,
+        location: Location,
+        radiusMiles: Float,
+    ): NarrationResult {
+        val systemPrompt = prefs.getString(PREF_SYSTEM_PROMPT, "")
+            ?.takeIf { it.isNotBlank() } ?: ClaudeApiService.SYSTEM_PROMPT
+
+        val template = prefs.getString(PREF_DEEP_DIVE_PROMPT, "")
+            ?.takeIf { it.isNotBlank() } ?: DEFAULT_DEEP_DIVE_PROMPT
+        val subject = if (poiSummary.isNotBlank()) "$poiName — $poiSummary" else poiName
+
+        val summaryInstruction = "\n\nBefore your narration, write one sentence on the very " +
+            "first line describing the specific subject you chose to explore — for example: " +
+            "\"The Dallas nightclub owner who silenced a nation\" or \"How grief shaped a " +
+            "generation's relationship with the American presidency.\" Do not start with a " +
+            "person's full name. Follow it with exactly one blank line, then begin your narration."
+
+        val userMessageText = template.replace("{subject}", subject) + summaryInstruction
+
+        val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
+        val history = historyStore.getMessages(
+            currentLat = location.latitude,
+            currentLon = location.longitude,
+            radiusMiles = radiusMiles,
+            expiryDays = expiryDays,
+        )
+        val messages = history + listOf(ClaudeMessage(role = "user", content = userMessageText))
+
+        Log.d(TAG, "generateDeepDiveNarration: subject='$poiName', ${history.size / 2} history pairs")
+
+        val provider = prefs.getString(PREF_NARRATION_PROVIDER, NARRATION_PROVIDER_ANTHROPIC)
+            ?: NARRATION_PROVIDER_ANTHROPIC
+        val savedModel = prefs.getString(PREF_NARRATION_MODEL, "") ?: ""
+
+        if (provider == NARRATION_PROVIDER_OPENAI) {
+            val key = prefs.getString(PREF_OPENAI_NARRATION_KEY, "") ?: ""
+            val model = savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+            repeat(3) { attempt ->
+                try {
+                    val text = callOpenAiChat(key, model, systemPrompt, history, userMessageText, 1500)
+                    if (text.isNotBlank()) {
+                        val (summary, narrationText) = parseSummaryAndNarration(text)
+                        return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                            historyStore.append(userMessage = userMessageText, assistantMessage = text,
+                                lat = location.latitude, lon = location.longitude)
+                        })
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Deep dive OpenAI attempt ${attempt + 1} failed: ${e.message}")
+                    if (attempt == 2) return NarrationResult(text = "Deep dive error: ${e.message}", commitHistory = {})
+                }
+                delay(3_000L * (attempt + 1))
+            }
+            return NarrationResult(text = "Unable to continue deep dive.", commitHistory = {})
+        }
+
+        // Anthropic path
+        val anthropicKey = prefs.getString(PREF_ANTHROPIC_KEY, BuildConfig.ANTHROPIC_API_KEY)
+            ?: BuildConfig.ANTHROPIC_API_KEY
+        val anthropicModel = savedModel.takeIf { it.isNotBlank() } ?: "claude-haiku-4-5-20251001"
+        val request = ClaudeRequest(
+            model = anthropicModel,
+            system = systemPrompt,
+            messages = messages,
+            maxTokens = 1500,
+        )
+
+        repeat(3) { attempt ->
+            try {
+                val response = claudeApi.createMessage(apiKey = anthropicKey, request = request)
+                response.usage?.let { usage ->
+                    val cost = computeCostUsd(anthropicModel, usage.inputTokens, usage.outputTokens)
+                    prefs.edit().putFloat(
+                        PREF_ANTHROPIC_SPEND_USD,
+                        prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
+                    ).apply()
+                }
+                val text = response.text
+                if (text.isNotBlank()) {
+                    val (summary, narrationText) = parseSummaryAndNarration(text)
+                    return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                        historyStore.append(userMessage = userMessageText, assistantMessage = text,
+                            lat = location.latitude, lon = location.longitude)
+                    })
+                }
+                val errMsg = response.error?.message ?: ""
+                if (errMsg.isNotBlank() && !errMsg.contains("timeout", ignoreCase = true)) {
+                    return NarrationResult(text = errMsg, commitHistory = {})
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Deep dive attempt ${attempt + 1} failed: ${e.message}")
+                if (attempt == 2) throw e
+            }
+            delay(3_000L * (attempt + 1))
+        }
+        return NarrationResult(text = "Unable to continue deep dive.", commitHistory = {})
+    }
+
     private fun computeCostUsd(model: String, inputTokens: Int, outputTokens: Int): Float {
         val (inputPer1M, outputPer1M) = when {
             model.contains("opus")   -> 15.00f to 75.00f
@@ -397,6 +497,13 @@ class NarrationRepository @Inject constructor(
         const val NARRATION_PROVIDER_OPENAI = "openai"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
         const val PREF_ANTHROPIC_SPEND_USD = "pref_anthropic_spend_usd"
+        const val PREF_DEEP_DIVE_PROMPT = "pref_deep_dive_prompt"
+        const val DEFAULT_DEEP_DIVE_PROMPT =
+            "I just heard about {subject}. Keep rabbit-trailing. Pick the single most " +
+            "interesting unexplored thread connected to this topic — a related person, event, " +
+            "era, controversy, cultural context, or idea — and give me an engaging narration " +
+            "about it. Do not repeat any facts or stories already covered. Go wherever the " +
+            "narrative leads."
         const val PREF_USER_PROMPT = "pref_user_prompt"
         const val DEFAULT_USER_PROMPT =
             "I'm currently at coordinates {location}. " +
