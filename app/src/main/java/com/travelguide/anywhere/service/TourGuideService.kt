@@ -543,7 +543,11 @@ class TourGuideService : LifecycleService() {
                 when {
                     isReplayMode -> { /* no prefetch */ }
                     isDeepDive.value && deepDiveCount < deepDiveMaxIterations -> {
-                        Log.i(TAG, "TTS onStart '$topicName' — triggering deep dive prefetch")
+                        Log.i(TAG, "TTS onStart '$topicName' — committing dive to history, triggering prefetch")
+                        // Commit the current dive's narration to history NOW so the
+                        // prefetch for the next dive sees it and won't repeat it.
+                        currentNarrationCommit?.invoke()
+                        currentNarrationCommit = null
                         startDeepDivePrefetch()
                     }
                     !isDeepDive.value -> {
@@ -725,13 +729,10 @@ class TourGuideService : LifecycleService() {
         isGenerating = false
         savedTopicName = ""
         loadingProgress.value = -1f
-        emitCurrentTopic("")
-        emitCurrentPoiImage(null)
-        currentPoiMeta.value = CurrentPoiMeta()
 
         if (isDeepDive.value) {
-            // Roll back the in-progress dive: it wasn't actually heard, so the
-            // numbered list and count should not reflect it.
+            // Keep the original POI card intact (topic, image, wiki) so the UI
+            // shows a seamless transition instead of collapsing and rebuilding.
             if (currentDeepDiveTitle.isNotBlank()) {
                 deepDiveSegments.value = deepDiveSegments.value.dropLast(1)
                 deepDiveCount = (deepDiveCount - 1).coerceAtLeast(0)
@@ -742,6 +743,10 @@ class TourGuideService : LifecycleService() {
             startDeepDiveCycle()
             return
         }
+
+        emitCurrentTopic("")
+        emitCurrentPoiImage(null)
+        currentPoiMeta.value = CurrentPoiMeta()
 
         if (isReplayMode) {
             isReplayMode = false
