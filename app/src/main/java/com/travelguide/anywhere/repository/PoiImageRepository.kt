@@ -28,8 +28,10 @@ class PoiImageRepository @Inject constructor(
             val colon = wp.indexOf(':')
             if (colon >= 0) {
                 val lang = wp.substring(0, colon)
-                val title = wp.substring(colon + 1).replace(' ', '_')
-                return@withContext "https://$lang.wikipedia.org/wiki/$title"
+                val title = wp.substring(colon + 1)
+                if (!isGenericWikipediaTitle(title)) {
+                    return@withContext "https://$lang.wikipedia.org/wiki/${title.replace(' ', '_')}"
+                }
             }
         }
         val wd = poi.tags["wikidata"] ?: return@withContext null
@@ -90,6 +92,7 @@ class PoiImageRepository @Inject constructor(
         if (colon < 0) return null
         val lang = tag.substring(0, colon)
         val title = tag.substring(colon + 1)
+        if (isGenericWikipediaTitle(title)) return null
         // Use the MediaWiki pageimages API — more reliable than the REST summary endpoint,
         // which only includes "thumbnail" when a lead image is explicitly configured on the
         // article. pageimages returns the designated representative image for any article.
@@ -151,7 +154,27 @@ class PoiImageRepository @Inject constructor(
         }
     }
 
+    // Returns true for Wikipedia article titles that describe a generic type of thing rather
+    // than a specific named place — avoids showing stock photos and unrelated articles.
+    private fun isGenericWikipediaTitle(title: String): Boolean =
+        title.lowercase().trim() in GENERIC_WIKIPEDIA_TITLES
+
     companion object {
         private const val TAG = "PoiImageRepository"
+
+        val GENERIC_WIKIPEDIA_TITLES = setOf(
+            "commemorative plaque", "plaque", "memorial plaque", "bronze plaque",
+            "historical marker", "historic marker", "heritage marker",
+            "state historical marker", "historical plaque",
+            "marker (monument)", "marker",
+            "bridge", "road bridge", "highway bridge", "footbridge", "pedestrian bridge",
+            "culvert",
+            "cemetery", "graveyard",
+            "church", "chapel", "cathedral",
+            "park", "city park", "national park", "state park",
+            "memorial", "war memorial", "monument",
+            "mural", "street art",
+            "historic district", "national historic district",
+        )
     }
 }

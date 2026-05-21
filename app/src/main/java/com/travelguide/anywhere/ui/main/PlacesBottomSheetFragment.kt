@@ -21,6 +21,7 @@ import com.travelguide.anywhere.BuildConfig
 import com.travelguide.anywhere.R
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.databinding.BottomSheetPlacesBinding
+import com.travelguide.anywhere.repository.PoiImageRepository
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
 import dagger.hilt.android.AndroidEntryPoint
@@ -137,8 +138,10 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
                 val colon = tag.indexOf(':')
                 if (colon >= 0) {
                     val lang = tag.substring(0, colon)
-                    val title = tag.substring(colon + 1).replace(' ', '_')
-                    "https://$lang.wikipedia.org/wiki/$title"
+                    val title = tag.substring(colon + 1)
+                    if (title.lowercase().trim() !in PoiImageRepository.GENERIC_WIKIPEDIA_TITLES)
+                        "https://$lang.wikipedia.org/wiki/${title.replace(' ', '_')}"
+                    else null
                 } else null
             }
             btnWikipedia.imageTintList = android.content.res.ColorStateList.valueOf(colorSecondary)
