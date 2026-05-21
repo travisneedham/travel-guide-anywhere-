@@ -329,7 +329,7 @@ class NarrationRepository @Inject constructor(
         val subject = if (poiSummary.isNotBlank()) "$poiName — $poiSummary" else poiName
 
         val summaryInstruction = "\n\nBefore your narration, format your response exactly like this:\n" +
-            "Line 1: a 2-3 word title in Title Case naming the thread you chose (e.g. \"Dallas Nightclub Owner\", " +
+            "Line 1: a 3-6 word title in Title Case naming the thread you chose (e.g. \"Dallas Nightclub Owner\", " +
             "\"Presidential Grief\", \"Ruby's Last Words\"). Do not use the original POI's name.\n" +
             "Line 2: blank.\n" +
             "Line 3: one sentence describing the subject you chose to explore (e.g. \"The Dallas nightclub " +
@@ -447,7 +447,7 @@ class NarrationRepository @Inject constructor(
             val title = parts[0].trim()
             val summary = parts[1].trim()
             val narration = parts[2].trim()
-            if (title.length in 1..40 && summary.isNotBlank() && narration.length > summary.length) {
+            if (title.length in 1..70 && summary.isNotBlank() && narration.length > summary.length) {
                 return Triple(title, summary, narration)
             }
         }
