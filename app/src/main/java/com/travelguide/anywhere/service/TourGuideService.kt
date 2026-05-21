@@ -629,10 +629,8 @@ class TourGuideService : LifecycleService() {
         currentPoiMeta.value = CurrentPoiMeta()
 
         if (isDeepDive.value) {
-            isDeepDive.value = false
-            deepDivePoiName = ""
-            deepDivePoiSummary = ""
-            // fall through to normal skip → next POI
+            startDeepDiveCycle()
+            return
         }
 
         if (isReplayMode) {
