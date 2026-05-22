@@ -164,14 +164,13 @@
                     android:id="@+id/rg_narration_provider"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
                     android:layout_marginBottom="16dp">
 
                     <RadioButton
                         android:id="@+id/rb_narration_anthropic"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
                         android:text="Anthropic"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/accent"
@@ -179,10 +178,17 @@
 
                     <RadioButton
                         android:id="@+id/rb_narration_openai"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
                         android:text="OpenAI"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent" />
+
+                    <RadioButton
+                        android:id="@+id/rb_narration_local"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="On-Device (Free)"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/accent" />
                 </RadioGroup>
@@ -361,6 +367,195 @@
                         android:textColor="@color/text_secondary"
                         android:text="Tap &quot;Fetch Models &amp; Balance&quot; to check"
                         android:layout_marginBottom="4dp" />
+                </LinearLayout>
+
+                <!-- Local on-device LLM sub-section -->
+                <LinearLayout
+                    android:id="@+id/section_authorship_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Narration runs entirely on your device — no API key needed, completely free. Quality and style will be noticeably different from the cloud options, and narrations may take 15 to 60 seconds to generate depending on your device."
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Phi-4 Mini model row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Phi-4 Mini — Quality"
+                                    android:textSize="13sp"
+                                    android:textColor="@color/text_primary"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="~2.5 GB download · best prose quality"
+                                    android:textSize="11sp"
+                                    android:textColor="@color/text_secondary" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_download_phi4"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Download"
+                                android:textSize="12sp"
+                                android:minWidth="0dp"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp" />
+
+                            <TextView
+                                android:id="@+id/tv_phi4_status"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Ready"
+                                android:textSize="12sp"
+                                android:textColor="@color/accent"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <ProgressBar
+                            android:id="@+id/pb_phi4"
+                            style="?android:attr/progressBarStyleHorizontal"
+                            android:layout_width="match_parent"
+                            android:layout_height="4dp"
+                            android:layout_marginTop="4dp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- SmolLM2 model row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="SmolLM2 1.7B — Fast"
+                                    android:textSize="13sp"
+                                    android:textColor="@color/text_primary"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="~1.1 GB download · faster, smaller"
+                                    android:textSize="11sp"
+                                    android:textColor="@color/text_secondary" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_download_smollm2"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Download"
+                                android:textSize="12sp"
+                                android:minWidth="0dp"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp" />
+
+                            <TextView
+                                android:id="@+id/tv_smollm2_status"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Ready"
+                                android:textSize="12sp"
+                                android:textColor="@color/accent"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <ProgressBar
+                            android:id="@+id/pb_smollm2"
+                            style="?android:attr/progressBarStyleHorizontal"
+                            android:layout_width="match_parent"
+                            android:layout_height="4dp"
+                            android:layout_marginTop="4dp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- Model selection (shown once at least one model is ready) -->
+                    <LinearLayout
+                        android:id="@+id/layout_local_model_select"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Use for narrations:"
+                            android:textSize="12sp"
+                            android:textColor="@color/text_secondary"
+                            android:layout_marginBottom="4dp" />
+
+                        <RadioGroup
+                            android:id="@+id/rg_local_model"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <RadioButton
+                                android:id="@+id/rb_local_phi4"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Phi-4 Mini (Quality)"
+                                android:textColor="@color/text_primary"
+                                android:buttonTint="@color/accent"
+                                android:checked="true" />
+
+                            <RadioButton
+                                android:id="@+id/rb_local_smollm2"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="SmolLM2 1.7B (Fast)"
+                                android:textColor="@color/text_primary"
+                                android:buttonTint="@color/accent" />
+                        </RadioGroup>
+                    </LinearLayout>
+
                 </LinearLayout>
 
             </LinearLayout>

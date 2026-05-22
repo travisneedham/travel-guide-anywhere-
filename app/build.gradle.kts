@@ -22,8 +22,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 145
-        versionName = "3.0.0"
+        versionCode = 146
+        versionName = "3.0.1"
 
         buildConfigField(
             "String",
@@ -131,6 +131,9 @@ dependencies {
 
     // Coil (image loading for POI photos)
     implementation(libs.coil)
+
+    // Local on-device LLM inference via llama.cpp
+    implementation("io.github.ljcamargo:llamacpp-kotlin:0.4.0")
 
     // AndroidX Media — MediaBrowserServiceCompat for Android Auto
     implementation(libs.androidx.media)

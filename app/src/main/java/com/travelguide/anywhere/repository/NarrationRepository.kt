@@ -11,6 +11,8 @@ import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.data.remote.dto.ClaudeMessage
 import com.travelguide.anywhere.data.remote.dto.ClaudeRequest
+import com.travelguide.anywhere.service.LocalLlmEngine
+import com.travelguide.anywhere.service.LocalLlmModelManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -29,6 +31,7 @@ class NarrationRepository @Inject constructor(
     private val historyStore: NarrationHistoryStore,
     private val okHttpClient: OkHttpClient,
     private val gson: Gson,
+    private val localLlmEngine: LocalLlmEngine,
 ) {
 
     data class NarrationResult(
@@ -98,6 +101,19 @@ class NarrationRepository @Inject constructor(
 
         Log.d(TAG, "generateNarration: provider=$provider, model=${savedModel.ifBlank { "(default)" }}, " +
             "${history.size / 2} history pairs, maxTokens=$maxTokens, wiki=${wikiExtract != null}")
+
+        if (provider == NARRATION_PROVIDER_LOCAL) {
+            val modelName = prefs.getString(PREF_LOCAL_LLM_MODEL, LocalLlmModelManager.LocalModel.PHI4_MINI.name) ?: ""
+            val model = runCatching { LocalLlmModelManager.LocalModel.valueOf(modelName) }.getOrDefault(LocalLlmModelManager.LocalModel.PHI4_MINI)
+            val text = localLlmEngine.generate(model, systemPrompt, history, userMessageText)
+            if (text.isNotBlank()) {
+                val (summary, narrationText) = parseSummaryAndNarration(text)
+                return NarrationResult(text = narrationText, summary = summary, commitHistory = {
+                    historyStore.append(userMessage = userMessageText, assistantMessage = text, lat = location.latitude, lon = location.longitude)
+                })
+            }
+            return NarrationResult(text = "Unable to generate narration. Check that a model is downloaded.", commitHistory = {})
+        }
 
         if (provider == NARRATION_PROVIDER_OPENAI) {
             val openAiKey = prefs.getString(PREF_OPENAI_NARRATION_KEY, "") ?: ""
@@ -356,6 +372,19 @@ class NarrationRepository @Inject constructor(
             ?: NARRATION_PROVIDER_ANTHROPIC
         val savedModel = prefs.getString(PREF_NARRATION_MODEL, "") ?: ""
 
+        if (provider == NARRATION_PROVIDER_LOCAL) {
+            val modelName = prefs.getString(PREF_LOCAL_LLM_MODEL, LocalLlmModelManager.LocalModel.PHI4_MINI.name) ?: ""
+            val model = runCatching { LocalLlmModelManager.LocalModel.valueOf(modelName) }.getOrDefault(LocalLlmModelManager.LocalModel.PHI4_MINI)
+            val text = localLlmEngine.generate(model, systemPrompt, history, userMessageText)
+            if (text.isNotBlank()) {
+                val (title, summary, narrationText) = parseDeepDiveResponse(text)
+                return NarrationResult(text = narrationText, summary = summary, title = title, commitHistory = {
+                    historyStore.append(userMessage = userMessageText, assistantMessage = text, lat = location.latitude, lon = location.longitude)
+                })
+            }
+            return NarrationResult(text = "Unable to continue deep dive.", commitHistory = {})
+        }
+
         if (provider == NARRATION_PROVIDER_OPENAI) {
             val key = prefs.getString(PREF_OPENAI_NARRATION_KEY, "") ?: ""
             val model = savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
@@ -517,6 +546,8 @@ class NarrationRepository @Inject constructor(
         const val PREF_OPENAI_NARRATION_KEY = "pref_openai_narration_key"
         const val NARRATION_PROVIDER_ANTHROPIC = "anthropic"
         const val NARRATION_PROVIDER_OPENAI = "openai"
+        const val NARRATION_PROVIDER_LOCAL = "local"
+        const val PREF_LOCAL_LLM_MODEL = "pref_local_llm_model"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
         const val PREF_ANTHROPIC_SPEND_USD = "pref_anthropic_spend_usd"
         const val PREF_DEEP_DIVE_PROMPT = "pref_deep_dive_prompt"

@@ -36,6 +36,7 @@ import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
+import com.travelguide.anywhere.service.LocalLlmModelManager
 import com.travelguide.anywhere.service.PiperModelManager
 import com.travelguide.anywhere.service.PiperTtsEngine
 import com.travelguide.anywhere.service.PiperVoice
@@ -70,6 +71,7 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var piperModelManager: PiperModelManager
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
     @Inject lateinit var narrationRepository: NarrationRepository
+    @Inject lateinit var localLlmModelManager: LocalLlmModelManager
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -106,6 +108,7 @@ class SettingsFragment : Fragment() {
         loadVoiceSettings()
         loadInterestFilters()
         loadPrompts()
+        loadLocalLlm()
         setupDiagnostics()
         setupExperiment()
     }
@@ -216,6 +219,7 @@ class SettingsFragment : Fragment() {
         )
         when (prefs.getString(NarrationRepository.PREF_NARRATION_PROVIDER, NarrationRepository.NARRATION_PROVIDER_ANTHROPIC)) {
             NarrationRepository.NARRATION_PROVIDER_OPENAI -> binding.rbNarrationOpenai.isChecked = true
+            NarrationRepository.NARRATION_PROVIDER_LOCAL -> binding.rbNarrationLocal.isChecked = true
             else -> binding.rbNarrationAnthropic.isChecked = true
         }
         applyNarrationProviderVisibility()
@@ -244,8 +248,10 @@ class SettingsFragment : Fragment() {
 
     private fun applyNarrationProviderVisibility() {
         val isOpenAI = binding.rbNarrationOpenai.isChecked
-        binding.sectionAuthorshipAnthropic.visibility = if (isOpenAI) View.GONE else View.VISIBLE
+        val isLocal = binding.rbNarrationLocal.isChecked
+        binding.sectionAuthorshipAnthropic.visibility = if (!isOpenAI && !isLocal) View.VISIBLE else View.GONE
         binding.sectionAuthorshipOpenai.visibility = if (isOpenAI) View.VISIBLE else View.GONE
+        binding.sectionAuthorshipLocal.visibility = if (isLocal) View.VISIBLE else View.GONE
     }
 
     private fun setupAnthropicModels() {
@@ -603,6 +609,102 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun loadLocalLlm() {
+        // Restore selected model
+        val savedModel = prefs.getString(NarrationRepository.PREF_LOCAL_LLM_MODEL,
+            LocalLlmModelManager.LocalModel.PHI4_MINI.name) ?: ""
+        if (savedModel == LocalLlmModelManager.LocalModel.SMOLLM2.name) {
+            binding.rbLocalSmollm2.isChecked = true
+        } else {
+            binding.rbLocalPhi4.isChecked = true
+        }
+
+        // Download buttons
+        binding.btnDownloadPhi4.setOnClickListener {
+            localLlmModelManager.downloadIfNeeded(LocalLlmModelManager.LocalModel.PHI4_MINI)
+        }
+        binding.btnDownloadSmollm2.setOnClickListener {
+            localLlmModelManager.downloadIfNeeded(LocalLlmModelManager.LocalModel.SMOLLM2)
+        }
+
+        // Observe state flows
+        viewLifecycleOwner.lifecycleScope.launch {
+            localLlmModelManager.stateFlowFor(LocalLlmModelManager.LocalModel.PHI4_MINI).collect { state ->
+                updateLocalModelUi(
+                    state,
+                    binding.btnDownloadPhi4,
+                    binding.pbPhi4,
+                    binding.tvPhi4Status,
+                )
+                updateLocalModelSelectVisibility()
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            localLlmModelManager.stateFlowFor(LocalLlmModelManager.LocalModel.SMOLLM2).collect { state ->
+                updateLocalModelUi(
+                    state,
+                    binding.btnDownloadSmollm2,
+                    binding.pbSmollm2,
+                    binding.tvSmollm2Status,
+                )
+                updateLocalModelSelectVisibility()
+            }
+        }
+    }
+
+    private fun updateLocalModelUi(
+        state: LocalLlmModelManager.DownloadState,
+        btn: com.google.android.material.button.MaterialButton,
+        progressBar: android.widget.ProgressBar,
+        statusTv: android.widget.TextView,
+    ) {
+        when (state) {
+            is LocalLlmModelManager.DownloadState.NotDownloaded -> {
+                btn.visibility = View.VISIBLE
+                btn.isEnabled = true
+                btn.text = "Download"
+                progressBar.visibility = View.GONE
+                statusTv.visibility = View.GONE
+            }
+            is LocalLlmModelManager.DownloadState.Downloading -> {
+                btn.visibility = View.GONE
+                progressBar.visibility = View.VISIBLE
+                progressBar.progress = (state.progress * 100).toInt()
+                statusTv.visibility = View.VISIBLE
+                statusTv.text = "${(state.progress * 100).toInt()}%"
+                statusTv.setTextColor(requireContext().getColor(R.color.text_secondary))
+            }
+            is LocalLlmModelManager.DownloadState.Ready -> {
+                btn.visibility = View.GONE
+                progressBar.visibility = View.GONE
+                statusTv.visibility = View.VISIBLE
+                statusTv.text = "Downloaded"
+                statusTv.setTextColor(requireContext().getColor(R.color.accent))
+            }
+            is LocalLlmModelManager.DownloadState.Error -> {
+                btn.visibility = View.VISIBLE
+                btn.isEnabled = true
+                btn.text = "Retry"
+                progressBar.visibility = View.GONE
+                statusTv.visibility = View.GONE
+                Toast.makeText(requireContext(), "Download failed: ${state.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun updateLocalModelSelectVisibility() {
+        val anyReady = localLlmModelManager.isReady(LocalLlmModelManager.LocalModel.PHI4_MINI) ||
+            localLlmModelManager.isReady(LocalLlmModelManager.LocalModel.SMOLLM2)
+        binding.layoutLocalModelSelect.visibility = if (anyReady) View.VISIBLE else View.GONE
+        // Disable radio buttons for models not yet downloaded
+        binding.rbLocalPhi4.isEnabled = localLlmModelManager.isReady(LocalLlmModelManager.LocalModel.PHI4_MINI)
+        binding.rbLocalSmollm2.isEnabled = localLlmModelManager.isReady(LocalLlmModelManager.LocalModel.SMOLLM2)
+        // If selected model got deleted somehow, switch to available one
+        if (binding.rbLocalPhi4.isChecked && !binding.rbLocalPhi4.isEnabled && binding.rbLocalSmollm2.isEnabled) {
+            binding.rbLocalSmollm2.isChecked = true
+        }
+    }
+
     private fun setupExperiment() {
         binding.btnRunExperiment.setOnClickListener {
             if (!kokoroModelManager.isReady) {
@@ -871,10 +973,11 @@ class SettingsFragment : Fragment() {
     private fun saveSettings() {
         val anthropicKey = binding.etApiKey.text?.toString()?.trim() ?: ""
 
-        val narrationProvider = if (binding.rbNarrationOpenai.isChecked)
-            NarrationRepository.NARRATION_PROVIDER_OPENAI
-        else
-            NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
+        val narrationProvider = when {
+            binding.rbNarrationLocal.isChecked -> NarrationRepository.NARRATION_PROVIDER_LOCAL
+            binding.rbNarrationOpenai.isChecked -> NarrationRepository.NARRATION_PROVIDER_OPENAI
+            else -> NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
+        }
         val anthropicModelIdx = ANTHROPIC_MODEL_LABELS.indexOf(
             binding.actvNarrationModel.text.toString()
         ).let { if (it < 0) 0 else it }
@@ -922,6 +1025,9 @@ class SettingsFragment : Fragment() {
             .putBoolean(PoiRepository.PREF_FILTER_PARK, binding.cbFilterPark.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, binding.cbFilterPlaceOfWorship.isChecked)
             .putString(NarrationRepository.PREF_DEEP_DIVE_PROMPT, binding.etDeepDivePrompt.text?.toString() ?: "")
+            .putString(NarrationRepository.PREF_LOCAL_LLM_MODEL,
+                if (binding.rbLocalSmollm2.isChecked) LocalLlmModelManager.LocalModel.SMOLLM2.name
+                else LocalLlmModelManager.LocalModel.PHI4_MINI.name)
             .apply()
     }
 
