@@ -522,9 +522,9 @@ class NarrationRepository @Inject constructor(
         const val PREF_DEEP_DIVE_PROMPT = "pref_deep_dive_prompt"
         const val DEFAULT_DEEP_DIVE_PROMPT =
             "I'm standing near {subject}. Tell me something new and fascinating about this " +
-            "specific place — a different story, person, era, detail, or angle you haven't " +
-            "covered yet. Stay focused on this location itself. Do not rabbit-trail to other " +
-            "topics or places. Do not repeat any facts or stories already covered."
+            "specific place. Pick a different story, person, era, detail, or angle you haven't " +
+            "covered yet. Stay focused on this location itself. Do not wander to other topics " +
+            "or other places. Do not repeat any facts or stories already covered."
         const val PREF_USER_PROMPT = "pref_user_prompt"
         const val DEFAULT_USER_PROMPT =
             "I'm currently at coordinates {location}. " +
