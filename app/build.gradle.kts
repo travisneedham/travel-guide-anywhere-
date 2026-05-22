@@ -14,6 +14,15 @@ if (localPropsFile.exists()) {
     localPropsFile.inputStream().use { localProps.load(it) }
 }
 
+// Force-pin androidx.core to our target SDK level; some transitive deps pull 1.18.0
+// which requires compileSdk 36 + AGP 8.9.1 — pin until we're ready to upgrade.
+configurations.all {
+    resolutionStrategy {
+        force("androidx.core:core:1.15.0")
+        force("androidx.core:core-ktx:1.15.0")
+    }
+}
+
 android {
     namespace = "com.travelguide.anywhere"
     compileSdk = 35
@@ -22,8 +31,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 147
-        versionName = "3.0.2"
+        versionCode = 148
+        versionName = "3.0.3"
 
         buildConfigField(
             "String",
