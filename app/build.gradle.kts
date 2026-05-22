@@ -1,5 +1,6 @@
 import java.net.URL
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
@@ -22,8 +23,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 152
-        versionName = "3.0.7"
+        versionCode = 153
+        versionName = "3.0.8"
 
         buildConfigField(
             "String",
@@ -66,14 +67,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     defaultConfig {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
