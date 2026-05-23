@@ -70,11 +70,7 @@ class MainViewModel @Inject constructor(
         }
         _routeParseState.value = RouteParseState.Loading
         parseJob = viewModelScope.launch {
-            val loc = TourGuideService.lastKnownLocation.value
-            val hint = loc?.let {
-                com.travelguide.anywhere.data.model.LatLon(it.latitude, it.longitude)
-            }
-            _routeParseState.value = when (val result = routeRepository.resolveRoute(url, hint)) {
+            _routeParseState.value = when (val result = routeRepository.resolveRoute(url)) {
                 is RouteRepository.Result.Success -> RouteParseState.Ready(result.route)
                 is RouteRepository.Result.Failure -> RouteParseState.Error(result.message)
             }

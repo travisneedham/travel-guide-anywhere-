@@ -39,10 +39,10 @@ class RouteRepository @Inject constructor(
         }
         .build()
 
-    suspend fun resolveRoute(url: String, deviceLocation: LatLon? = null): Result = withContext(Dispatchers.IO) {
+    suspend fun resolveRoute(url: String): Result = withContext(Dispatchers.IO) {
         try {
             val fullUrl = expandUrl(url)
-            Log.i(TAG, "resolveRoute — expanded URL: $fullUrl")
+            Log.d(TAG, "Expanded URL: $fullUrl")
 
             val parsed = parseGoogleMapsUrl(fullUrl)
                 ?: return@withContext Result.Failure("Could not find an origin and destination in that link.")
@@ -51,16 +51,17 @@ class RouteRepository @Inject constructor(
             val destStr = parsed.dest
             val travelMode = parsed.travelMode
             val viewportHint = parsed.viewportHint
-            // Priority for geocoding anchor:
-            //   1. @lat,lon viewport in the URL  — in the exact correct country
-            //   2. device GPS location           — reliable when user is on-site
-            //   3. null                          — unbiased Nominatim search (last resort)
-            val geoAnchor = viewportHint ?: deviceLocation
-            Log.i(TAG, "resolveRoute — origin='$originStr' dest='$destStr' mode=$travelMode viewport=$viewportHint device=$deviceLocation anchor=$geoAnchor")
+            Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode  viewport=$viewportHint")
 
-            val origin = geocodeIfNeeded(originStr, proximityHint = geoAnchor)
+            // Use the viewport centre (the @lat,lon embedded in the URL path) as geographic
+            // context for both geocoding calls. This is the most reliable anchor — it's the
+            // map's view centre and is always in the correct country, so "Parthenon" resolves
+            // to Athens Greece rather than the Nashville replica, and "Athens" resolves to
+            // Athens Greece rather than Athens Georgia.
+            val origin = geocodeIfNeeded(originStr, proximityHint = viewportHint)
                 ?: return@withContext Result.Failure("Could not locate: $originStr")
-            val dest = geocodeIfNeeded(destStr, proximityHint = geoAnchor ?: origin)
+            // Also use the resolved origin as a secondary hint in case there was no viewport.
+            val dest = geocodeIfNeeded(destStr, proximityHint = viewportHint ?: origin)
                 ?: return@withContext Result.Failure("Could not locate: $destStr")
 
             val coordsStr = "${origin.lon},${origin.lat};${dest.lon},${dest.lat}"
