@@ -50,9 +50,12 @@ class RouteRepository @Inject constructor(
             val (originStr, destStr, travelMode) = parsed
             Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode")
 
+            // Geocode origin first, then bias the destination search with the origin's
+            // coordinates. This prevents "Parthenon" (for example) from resolving to a
+            // replica in another country when the route is clearly set in Greece.
             val origin = geocodeIfNeeded(originStr)
                 ?: return@withContext Result.Failure("Could not locate: $originStr")
-            val dest = geocodeIfNeeded(destStr)
+            val dest = geocodeIfNeeded(destStr, proximityHint = origin)
                 ?: return@withContext Result.Failure("Could not locate: $destStr")
 
             val coordsStr = "${origin.lon},${origin.lat};${dest.lon},${dest.lat}"
@@ -115,8 +118,17 @@ class RouteRepository @Inject constructor(
         // ?api=1 format: origin= and destination= query params
         val originParam = uri.getQueryParameter("origin")
         val destParam = uri.getQueryParameter("destination")
-        if (!originParam.isNullOrBlank() && !destParam.isNullOrBlank()) {
+        if (!originParam.isNullOrBlank() && !destParam.isNullOrBlank() &&
+            !isCurrentLocation(originParam)
+        ) {
             return Triple(originParam, destParam, travelMode)
+        }
+
+        // Older ?saddr= / ?daddr= format (common in maps.app.goo.gl expansions)
+        val saddr = uri.getQueryParameter("saddr")
+        val daddr = uri.getQueryParameter("daddr")
+        if (!saddr.isNullOrBlank() && !daddr.isNullOrBlank() && !isCurrentLocation(saddr)) {
+            return Triple(saddr, daddr, travelMode)
         }
 
         // /dir/ORIGIN/DESTINATION/ path format
@@ -127,14 +139,21 @@ class RouteRepository @Inject constructor(
             val destSeg = segments[dirIndex + 2]
             if (originSeg.isNotBlank() && !originSeg.startsWith("@") &&
                 destSeg.isNotBlank() && !destSeg.startsWith("@") &&
-                !originSeg.equals("current+location", ignoreCase = true) &&
-                !originSeg.equals("current location", ignoreCase = true)
+                !isCurrentLocation(originSeg)
             ) {
                 return Triple(originSeg, destSeg, travelMode)
             }
         }
 
         return null
+    }
+
+    private fun isCurrentLocation(s: String): Boolean {
+        val normalized = s.replace('+', ' ').trim()
+        return normalized.equals("current location", ignoreCase = true) ||
+            normalized.equals("my location", ignoreCase = true) ||
+            normalized.equals("here", ignoreCase = true) ||
+            normalized.equals("your location", ignoreCase = true)
     }
 
     private fun detectTravelMode(uri: Uri): TravelMode {
@@ -147,7 +166,7 @@ class RouteRepository @Inject constructor(
         }
     }
 
-    private suspend fun geocodeIfNeeded(locationStr: String): LatLon? {
+    private suspend fun geocodeIfNeeded(locationStr: String, proximityHint: LatLon? = null): LatLon? {
         val coordRegex = Regex("""^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$""")
         val match = coordRegex.find(locationStr.trim())
         if (match != null) {
@@ -156,8 +175,15 @@ class RouteRepository @Inject constructor(
                 lon = match.groupValues[2].toDouble()
             )
         }
+        // Build a ±5-degree viewbox around the hint so Nominatim ranks geographically
+        // nearby results first. This prevents e.g. "Parthenon" from returning the
+        // Nashville replica when the route is anchored in Greece.
+        val viewbox = proximityHint?.let { h ->
+            val d = 5.0
+            "${h.lon - d},${h.lat + d},${h.lon + d},${h.lat - d}"
+        }
         return try {
-            nominatimService.search(query = locationStr, format = "json", limit = 1)
+            nominatimService.search(query = locationStr, format = "json", limit = 1, viewbox = viewbox)
                 .firstOrNull()
                 ?.let { LatLon(lat = it.lat.toDouble(), lon = it.lon.toDouble()) }
         } catch (e: Exception) {
