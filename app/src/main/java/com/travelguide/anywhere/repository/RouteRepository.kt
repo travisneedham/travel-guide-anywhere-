@@ -47,15 +47,21 @@ class RouteRepository @Inject constructor(
             val parsed = parseGoogleMapsUrl(fullUrl)
                 ?: return@withContext Result.Failure("Could not find an origin and destination in that link.")
 
-            val (originStr, destStr, travelMode) = parsed
-            Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode")
+            val originStr = parsed.origin
+            val destStr = parsed.dest
+            val travelMode = parsed.travelMode
+            val viewportHint = parsed.viewportHint
+            Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode  viewport=$viewportHint")
 
-            // Geocode origin first, then bias the destination search with the origin's
-            // coordinates. This prevents "Parthenon" (for example) from resolving to a
-            // replica in another country when the route is clearly set in Greece.
-            val origin = geocodeIfNeeded(originStr)
+            // Use the viewport centre (the @lat,lon embedded in the URL path) as geographic
+            // context for both geocoding calls. This is the most reliable anchor — it's the
+            // map's view centre and is always in the correct country, so "Parthenon" resolves
+            // to Athens Greece rather than the Nashville replica, and "Athens" resolves to
+            // Athens Greece rather than Athens Georgia.
+            val origin = geocodeIfNeeded(originStr, proximityHint = viewportHint)
                 ?: return@withContext Result.Failure("Could not locate: $originStr")
-            val dest = geocodeIfNeeded(destStr, proximityHint = origin)
+            // Also use the resolved origin as a secondary hint in case there was no viewport.
+            val dest = geocodeIfNeeded(destStr, proximityHint = viewportHint ?: origin)
                 ?: return@withContext Result.Failure("Could not locate: $destStr")
 
             val coordsStr = "${origin.lon},${origin.lat};${dest.lon},${dest.lat}"
@@ -111,9 +117,24 @@ class RouteRepository @Inject constructor(
         }
     }
 
-    private fun parseGoogleMapsUrl(url: String): Triple<String, String, TravelMode>? {
+    // Returns (originStr, destStr, travelMode, viewportHint).
+    // viewportHint is the @lat,lon viewport centre embedded in the URL — always in the
+    // correct country, so it's the most reliable anchor for Nominatim geocoding.
+    private fun parseGoogleMapsUrl(url: String): ParsedRoute? {
         val uri = Uri.parse(url)
         val travelMode = detectTravelMode(uri)
+
+        // Extract the @lat,lon,zoomz viewport from any path segment that starts with '@'.
+        // e.g. "@37.9757,23.7369,14z" → LatLon(37.9757, 23.7369)
+        val viewportHint = uri.pathSegments
+            .firstOrNull { it.startsWith("@") }
+            ?.removePrefix("@")
+            ?.split(",")
+            ?.let { parts ->
+                val lat = parts.getOrNull(0)?.toDoubleOrNull()
+                val lon = parts.getOrNull(1)?.toDoubleOrNull()
+                if (lat != null && lon != null) LatLon(lat, lon) else null
+            }
 
         // ?api=1 format: origin= and destination= query params
         val originParam = uri.getQueryParameter("origin")
@@ -121,14 +142,14 @@ class RouteRepository @Inject constructor(
         if (!originParam.isNullOrBlank() && !destParam.isNullOrBlank() &&
             !isCurrentLocation(originParam)
         ) {
-            return Triple(originParam, destParam, travelMode)
+            return ParsedRoute(originParam, destParam, travelMode, viewportHint)
         }
 
         // Older ?saddr= / ?daddr= format (common in maps.app.goo.gl expansions)
         val saddr = uri.getQueryParameter("saddr")
         val daddr = uri.getQueryParameter("daddr")
         if (!saddr.isNullOrBlank() && !daddr.isNullOrBlank() && !isCurrentLocation(saddr)) {
-            return Triple(saddr, daddr, travelMode)
+            return ParsedRoute(saddr, daddr, travelMode, viewportHint)
         }
 
         // /dir/ORIGIN/DESTINATION/ path format
@@ -141,12 +162,19 @@ class RouteRepository @Inject constructor(
                 destSeg.isNotBlank() && !destSeg.startsWith("@") &&
                 !isCurrentLocation(originSeg)
             ) {
-                return Triple(originSeg, destSeg, travelMode)
+                return ParsedRoute(originSeg, destSeg, travelMode, viewportHint)
             }
         }
 
         return null
     }
+
+    private data class ParsedRoute(
+        val origin: String,
+        val dest: String,
+        val travelMode: TravelMode,
+        val viewportHint: LatLon?,
+    )
 
     private fun isCurrentLocation(s: String): Boolean {
         val normalized = s.replace('+', ' ').trim()
