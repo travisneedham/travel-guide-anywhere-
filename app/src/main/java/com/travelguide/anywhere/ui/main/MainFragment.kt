@@ -415,10 +415,17 @@ class MainFragment : Fragment() {
                     NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
                 ) ?: NarrationRepository.NARRATION_PROVIDER_ANTHROPIC
                 val savedModel = prefs.getString(NarrationRepository.PREF_NARRATION_MODEL, "") ?: ""
-                val modelName = if (narrationProvider == NarrationRepository.NARRATION_PROVIDER_OPENAI) {
-                    savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
-                } else {
-                    when (savedModel) {
+                val modelName = when {
+                    narrationProvider == NarrationRepository.NARRATION_PROVIDER_OPENAI ->
+                        savedModel.takeIf { it.isNotBlank() } ?: "gpt-4o-mini"
+                    narrationProvider == NarrationRepository.NARRATION_PROVIDER_LOCAL -> {
+                        val localModelName = prefs.getString(NarrationRepository.PREF_LOCAL_LLM_MODEL,
+                            com.travelguide.anywhere.service.LocalLlmModelManager.LocalModel.PHI4_MINI.name) ?: ""
+                        runCatching {
+                            com.travelguide.anywhere.service.LocalLlmModelManager.LocalModel.valueOf(localModelName).displayName
+                        }.getOrDefault(com.travelguide.anywhere.service.LocalLlmModelManager.LocalModel.PHI4_MINI.displayName)
+                    }
+                    else -> when (savedModel) {
                         "claude-sonnet-4-6" -> "Sonnet 4.6"
                         "claude-opus-4-7"   -> "Opus 4.7"
                         else                -> "Haiku 4.5"
