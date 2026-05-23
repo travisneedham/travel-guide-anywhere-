@@ -54,6 +54,10 @@ class TourGuideService : LifecycleService() {
     private var apiKey = ""
     private var famousMode = false
     private var lastLocation: Location? = null
+        set(value) {
+            field = value
+            if (value != null) lastKnownLocation.value = value
+        }
     private var generationJob: Job? = null
     private var prefetchJob: Job? = null
     private var imageFetchJob: Job? = null
@@ -1015,6 +1019,7 @@ class TourGuideService : LifecycleService() {
         val loadingProgress = MutableStateFlow(-1f)
         val isDeepDive = MutableStateFlow(false)
         val deepDiveSegments = MutableStateFlow<List<String>>(emptyList())
+        val lastKnownLocation = MutableStateFlow<android.location.Location?>(null)
 
         private fun emitState(state: TourState) { tourState.value = state }
         private fun emitCurrentTopic(topic: String) { currentTopic.value = topic }
