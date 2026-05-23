@@ -530,12 +530,16 @@ class TourGuideService : LifecycleService() {
         updateNotification("Loading audio: $topicName", true)
 
         val speechRate = sharedPrefs.getFloat(PREF_SPEECH_RATE, 1.0f)
-        loadingProgress.value = -1f
+        startLoadingProgressEstimator(text)
         engine.speak(
             text = text,
             speechRate = speechRate,
-            onProgress = { fraction -> loadingProgress.value = fraction },
+            onProgress = { fraction ->
+                // Engine-reported milestone acts as a floor — never moves the bar backwards.
+                if (fraction > loadingProgress.value) loadingProgress.value = fraction
+            },
             onStart = {
+                stopLoadingProgressEstimator()
                 loadingProgress.value = -1f
                 emitState(TourState.SPEAKING)
                 updateNotification("Now: $topicName")
@@ -655,6 +659,7 @@ class TourGuideService : LifecycleService() {
                 currentNarrationSummary = ""
                 currentNarrationWikipediaUrl = null
                 isSpeaking = false
+                stopLoadingProgressEstimator()
                 loadingProgress.value = -1f
                 lifecycleScope.launch {
                     emitCurrentTopic("")
@@ -727,6 +732,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
+        stopLoadingProgressEstimator()
         loadingProgress.value = -1f
 
         if (isDeepDive.value) {
@@ -799,6 +805,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         savedTopicName = ""
+        stopLoadingProgressEstimator()
         loadingProgress.value = -1f
         emitCurrentTopic("")
         emitCurrentPoiImage(null)
@@ -806,6 +813,53 @@ class TourGuideService : LifecycleService() {
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    // ── Loading-progress estimator ────────────────────────────────────────────
+    // Drives the LOADING_AUDIO spinner forward at a rate calibrated to the active TTS
+    // engine, so the user sees a smooth, roughly realistic fill instead of an infinite
+    // spin. The engine's own onProgress callback acts as a floor — if it reports a
+    // milestone ahead of where the estimator is, we jump forward.
+    //
+    // Per-engine constants come from observed field timings on mid-range Android
+    // hardware (Samsung SM-F766U1). They overestimate slightly so the bar reaches ~95%
+    // around the time audio actually starts; the bar is then snapped to 100% (briefly)
+    // and reset to indeterminate on onStart.
+
+    private var loadingProgressJob: Job? = null
+
+    private fun estimateTtsGenerationMs(textLen: Int): Long {
+        val (overheadMs, msPerChar) = when (ttsEngine) {
+            is PiperTtsEngine -> 800L to 30L
+            is KokoroTtsEngine -> 1500L to 70L
+            is OpenAiTtsEngine -> 1200L to 12L
+            else -> 400L to 5L  // AndroidTtsEngine and fallback
+        }
+        return overheadMs + textLen * msPerChar
+    }
+
+    private fun startLoadingProgressEstimator(text: String) {
+        loadingProgressJob?.cancel()
+        val estimatedMs = estimateTtsGenerationMs(text.length).coerceAtLeast(1L)
+        val startTime = System.currentTimeMillis()
+        loadingProgress.value = 0.02f  // small initial fill so the bar doesn't look empty
+        loadingProgressJob = lifecycleScope.launch {
+            try {
+                while (isActive) {
+                    val elapsed = System.currentTimeMillis() - startTime
+                    // Asymptotic: linear toward 0.95, never reaches 1.0 from time alone —
+                    // engine's onStart callback is what flips us out of LOADING_AUDIO.
+                    val projected = (elapsed.toFloat() / estimatedMs).coerceAtMost(0.95f)
+                    if (projected > loadingProgress.value) loadingProgress.value = projected
+                    delay(120)
+                }
+            } catch (_: CancellationException) {}
+        }
+    }
+
+    private fun stopLoadingProgressEstimator() {
+        loadingProgressJob?.cancel()
+        loadingProgressJob = null
     }
 
     private fun initTtsEngine() {
