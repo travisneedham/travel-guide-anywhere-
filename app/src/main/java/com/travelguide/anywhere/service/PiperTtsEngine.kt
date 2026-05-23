@@ -162,25 +162,9 @@ class PiperTtsEngine(
         val engine = tts ?: return@withContext null
         val outFile = File(context.cacheDir, "$prefix${UUID.randomUUID()}.wav")
         try {
-            if (onProgress != null) {
-                // Piper VITS outputs at 22050 Hz. Estimate total samples from text length:
-                // ~65 ms of audio per character at 1.0× speed → 22050 * 0.065 ≈ 1433 samples/char.
-                val estimatedSamples = (text.length * 1433 / speechRate).toLong().coerceAtLeast(1)
-                var samplesGenerated = 0L
-                engine.generateWithCallback(
-                    text = text,
-                    sid = 0,
-                    speed = speechRate,
-                ) { samples ->
-                    samplesGenerated += samples.size
-                    onProgress((samplesGenerated.toFloat() / estimatedSamples).coerceAtMost(0.95f))
-                    1  // continue
-                }.save(outFile.absolutePath)
-                onProgress(1.0f)
-            } else {
-                engine.generate(text = text, sid = 0, speed = speechRate)
-                    .save(outFile.absolutePath)
-            }
+            engine.generate(text = text, sid = 0, speed = speechRate)
+                .save(outFile.absolutePath)
+            onProgress?.invoke(1.0f)
             outFile
         } catch (e: Exception) {
             Log.e(TAG, "Piper generate error: ${e.message}")
