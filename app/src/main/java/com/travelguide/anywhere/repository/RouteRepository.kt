@@ -42,31 +42,33 @@ class RouteRepository @Inject constructor(
     suspend fun resolveRoute(url: String): Result = withContext(Dispatchers.IO) {
         try {
             val fullUrl = expandUrl(url)
-            Log.d(TAG, "Expanded URL: $fullUrl")
+            Log.i(TAG, "resolveRoute — expanded: $fullUrl")
 
             val parsed = parseGoogleMapsUrl(fullUrl)
                 ?: return@withContext Result.Failure("Could not find an origin and destination in that link.")
 
-            val originStr = parsed.origin
-            val destStr = parsed.dest
-            val travelMode = parsed.travelMode
-            val viewportHint = parsed.viewportHint
-            Log.d(TAG, "Parsed: origin=$originStr  dest=$destStr  mode=$travelMode  viewport=$viewportHint")
+            Log.i(TAG, "resolveRoute — origin='${parsed.origin}' dest='${parsed.dest}' " +
+                "mode=${parsed.travelMode} viewport=${parsed.viewportHint} " +
+                "originCoord=${parsed.originCoord} destCoord=${parsed.destCoord}")
 
-            // Use the viewport centre (the @lat,lon embedded in the URL path) as geographic
-            // context for both geocoding calls. This is the most reliable anchor — it's the
-            // map's view centre and is always in the correct country, so "Parthenon" resolves
-            // to Athens Greece rather than the Nashville replica, and "Athens" resolves to
-            // Athens Greece rather than Athens Georgia.
-            val origin = geocodeIfNeeded(originStr, proximityHint = viewportHint)
-                ?: return@withContext Result.Failure("Could not locate: $originStr")
-            // Also use the resolved origin as a secondary hint in case there was no viewport.
-            val dest = geocodeIfNeeded(destStr, proximityHint = viewportHint ?: origin)
-                ?: return@withContext Result.Failure("Could not locate: $destStr")
+            // Level 1: use coordinates extracted directly from the data= segment.
+            // These are Google's own resolved coordinates — no geocoding ambiguity possible.
+            // Level 2: fall back to Nominatim, but with bounded=1 inside a ±2° box around
+            // the @lat,lon viewport so results are restricted to the correct country/region.
+            // Level 3: unbiased Nominatim only if we have no geographic anchor at all.
+            val viewport = parsed.viewportHint
+            val origin = parsed.originCoord
+                ?: geocodeWithContext(parsed.origin, anchor = viewport)
+                ?: return@withContext Result.Failure("Could not locate: ${parsed.origin}")
+            val dest = parsed.destCoord
+                ?: geocodeWithContext(parsed.dest, anchor = viewport ?: origin)
+                ?: return@withContext Result.Failure("Could not locate: ${parsed.dest}")
+
+            Log.i(TAG, "resolveRoute — resolved origin=$origin dest=$dest")
 
             val coordsStr = "${origin.lon},${origin.lat};${dest.lon},${dest.lat}"
             val osrmResponse = osrmService.getRoute(
-                profile = travelMode.osrmProfile,
+                profile = parsed.travelMode.osrmProfile,
                 coordinates = coordsStr,
                 geometries = "geojson",
                 overview = "full"
@@ -92,9 +94,9 @@ class RouteRepository @Inject constructor(
                     waypoints = waypoints,
                     totalDistanceMeters = route.distance,
                     totalDurationSeconds = route.duration.toLong(),
-                    travelMode = travelMode,
-                    originLabel = originStr,
-                    destinationLabel = destStr
+                    travelMode = parsed.travelMode,
+                    originLabel = parsed.origin,
+                    destinationLabel = parsed.dest
                 )
             )
         } catch (e: Exception) {
@@ -117,15 +119,30 @@ class RouteRepository @Inject constructor(
         }
     }
 
-    // Returns (originStr, destStr, travelMode, viewportHint).
-    // viewportHint is the @lat,lon viewport centre embedded in the URL — always in the
-    // correct country, so it's the most reliable anchor for Nominatim geocoding.
+    private data class ParsedRoute(
+        val origin: String,
+        val dest: String,
+        val travelMode: TravelMode,
+        val viewportHint: LatLon?,
+        // Exact coordinates extracted from the data= segment, bypassing Nominatim entirely.
+        val originCoord: LatLon?,
+        val destCoord: LatLon?,
+    )
+
     private fun parseGoogleMapsUrl(url: String): ParsedRoute? {
         val uri = Uri.parse(url)
-        val travelMode = detectTravelMode(uri)
 
-        // Extract the @lat,lon,zoomz viewport from any path segment that starts with '@'.
-        // e.g. "@37.9757,23.7369,14z" → LatLon(37.9757, 23.7369)
+        // The data= payload is a path segment in /dir/ URLs, not a query parameter.
+        // Check both locations so we handle all URL formats.
+        val dataSegment = uri.pathSegments.firstOrNull { it.startsWith("data=") }
+            ?.removePrefix("data=")
+            ?: uri.getQueryParameter("data")
+            ?: ""
+
+        val travelMode = detectTravelMode(dataSegment)
+
+        // Extract the @lat,lon,zoomz viewport — present in virtually all expanded URLs.
+        // e.g. "@37.9757,23.7369,14z"
         val viewportHint = uri.pathSegments
             .firstOrNull { it.startsWith("@") }
             ?.removePrefix("@")
@@ -136,20 +153,27 @@ class RouteRepository @Inject constructor(
                 if (lat != null && lon != null) LatLon(lat, lon) else null
             }
 
+        // Extract exact waypoint coordinates from the data= segment.
+        // Google encodes each named place as !2m2!1d{longitude}!2d{latitude}.
+        // The pairs appear in route order: first = origin, second = destination.
+        val waypointCoords = extractWaypointCoords(dataSegment)
+        val originCoord = waypointCoords.getOrNull(0)
+        val destCoord = waypointCoords.getOrNull(1)
+
         // ?api=1 format: origin= and destination= query params
         val originParam = uri.getQueryParameter("origin")
         val destParam = uri.getQueryParameter("destination")
         if (!originParam.isNullOrBlank() && !destParam.isNullOrBlank() &&
             !isCurrentLocation(originParam)
         ) {
-            return ParsedRoute(originParam, destParam, travelMode, viewportHint)
+            return ParsedRoute(originParam, destParam, travelMode, viewportHint, originCoord, destCoord)
         }
 
         // Older ?saddr= / ?daddr= format (common in maps.app.goo.gl expansions)
         val saddr = uri.getQueryParameter("saddr")
         val daddr = uri.getQueryParameter("daddr")
         if (!saddr.isNullOrBlank() && !daddr.isNullOrBlank() && !isCurrentLocation(saddr)) {
-            return ParsedRoute(saddr, daddr, travelMode, viewportHint)
+            return ParsedRoute(saddr, daddr, travelMode, viewportHint, originCoord, destCoord)
         }
 
         // /dir/ORIGIN/DESTINATION/ path format
@@ -162,19 +186,28 @@ class RouteRepository @Inject constructor(
                 destSeg.isNotBlank() && !destSeg.startsWith("@") &&
                 !isCurrentLocation(originSeg)
             ) {
-                return ParsedRoute(originSeg, destSeg, travelMode, viewportHint)
+                return ParsedRoute(originSeg, destSeg, travelMode, viewportHint, originCoord, destCoord)
             }
         }
 
         return null
     }
 
-    private data class ParsedRoute(
-        val origin: String,
-        val dest: String,
-        val travelMode: TravelMode,
-        val viewportHint: LatLon?,
-    )
+    /**
+     * Extracts waypoint (lon, lat) pairs from the Google Maps data= segment.
+     *
+     * In a directions URL the data payload is Protocol-Buffer-lite encoded.
+     * Each named waypoint is stored as a coordinate message with the pattern:
+     *   !2m2!1d{longitude}!2d{latitude}
+     * Pairs appear in route order so index 0 = origin, index 1 = destination.
+     */
+    private fun extractWaypointCoords(data: String): List<LatLon> {
+        if (data.isEmpty()) return emptyList()
+        val regex = Regex("""!2m2!1d(-?\d+\.\d+)!2d(-?\d+\.\d+)""")
+        return regex.findAll(data).map { m ->
+            LatLon(lat = m.groupValues[2].toDouble(), lon = m.groupValues[1].toDouble())
+        }.toList()
+    }
 
     private fun isCurrentLocation(s: String): Boolean {
         val normalized = s.replace('+', ' ').trim()
@@ -184,17 +217,24 @@ class RouteRepository @Inject constructor(
             normalized.equals("your location", ignoreCase = true)
     }
 
-    private fun detectTravelMode(uri: Uri): TravelMode {
-        val data = uri.getQueryParameter("data") ?: ""
-        return when {
-            data.contains("!3e2") -> TravelMode.WALKING
-            data.contains("!3e1") -> TravelMode.CYCLING
-            data.contains("!3e3") -> TravelMode.TRANSIT
-            else -> TravelMode.DRIVING
-        }
+    private fun detectTravelMode(dataSegment: String): TravelMode = when {
+        dataSegment.contains("!3e2") -> TravelMode.WALKING
+        dataSegment.contains("!3e1") -> TravelMode.CYCLING
+        dataSegment.contains("!3e3") -> TravelMode.TRANSIT
+        else -> TravelMode.DRIVING
     }
 
-    private suspend fun geocodeIfNeeded(locationStr: String, proximityHint: LatLon? = null): LatLon? {
+    /**
+     * Resolves a location string to coordinates.
+     *
+     * If [locationStr] is already a "lat,lon" pair, returns it directly.
+     * Otherwise calls Nominatim. When [anchor] is provided, the search is
+     * restricted to a ±2° bounding box around it (bounded=1), which forces
+     * Nominatim to only return results in the correct region — Nashville's
+     * Parthenon cannot be returned if the anchor is in Athens, Greece.
+     * Without an anchor the search is unbiased (last resort).
+     */
+    private suspend fun geocodeWithContext(locationStr: String, anchor: LatLon? = null): LatLon? {
         val coordRegex = Regex("""^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$""")
         val match = coordRegex.find(locationStr.trim())
         if (match != null) {
@@ -203,17 +243,31 @@ class RouteRepository @Inject constructor(
                 lon = match.groupValues[2].toDouble()
             )
         }
-        // Build a ±5-degree viewbox around the hint so Nominatim ranks geographically
-        // nearby results first. This prevents e.g. "Parthenon" from returning the
-        // Nashville replica when the route is anchored in Greece.
-        val viewbox = proximityHint?.let { h ->
-            val d = 5.0
-            "${h.lon - d},${h.lat + d},${h.lon + d},${h.lat - d}"
+
+        val (viewbox, bounded) = if (anchor != null) {
+            val d = 2.0
+            val box = "${anchor.lon - d},${anchor.lat + d},${anchor.lon + d},${anchor.lat - d}"
+            box to 1
+        } else {
+            null to null
         }
+
         return try {
-            nominatimService.search(query = locationStr, format = "json", limit = 1, viewbox = viewbox)
-                .firstOrNull()
-                ?.let { LatLon(lat = it.lat.toDouble(), lon = it.lon.toDouble()) }
+            val results = nominatimService.search(
+                query = locationStr,
+                format = "json",
+                limit = 1,
+                viewbox = viewbox,
+                bounded = bounded,
+            )
+            // If bounded search returns nothing (place slightly outside ±2°), retry without.
+            val result = results.firstOrNull()
+                ?: if (bounded != null) {
+                    Log.w(TAG, "Bounded geocode for '$locationStr' returned nothing — retrying unbiased")
+                    nominatimService.search(query = locationStr, format = "json", limit = 1)
+                        .firstOrNull()
+                } else null
+            result?.let { LatLon(lat = it.lat.toDouble(), lon = it.lon.toDouble()) }
         } catch (e: Exception) {
             Log.e(TAG, "Geocoding failed for '$locationStr': ${e.message}")
             null

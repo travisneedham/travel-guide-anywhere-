@@ -11,11 +11,9 @@ interface NominatimService {
         @Query("q") query: String,
         @Query("format") format: String,
         @Query("limit") limit: Int,
-        // Optional geographic bias — "left,top,right,bottom" (min_lon,max_lat,max_lon,min_lat).
-        // When non-null, results inside the box are ranked first. bounded=1 restricts results
-        // to within the box; we leave it off so we always get a result even if the query
-        // is slightly outside (e.g. destination just beyond origin's ±5° box).
         @Query("viewbox") viewbox: String? = null,
+        // 1 = restrict results to inside the viewbox; omitted when viewbox is null.
+        @Query("bounded") bounded: Int? = null,
     ): List<NominatimResult>
 
     companion object {
