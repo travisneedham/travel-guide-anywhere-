@@ -53,15 +53,15 @@ class RouteRepository @Inject constructor(
 
             // Level 1: use coordinates extracted directly from the data= segment.
             // These are Google's own resolved coordinates — no geocoding ambiguity possible.
-            // Level 2: fall back to Nominatim, but with bounded=1 inside a ±2° box around
-            // the @lat,lon viewport so results are restricted to the correct country/region.
+            // Level 2: Nominatim with a soft ±2° viewbox hint around the viewport (bounded=0).
+            //   Global importance scores still govern — famous places in Greece beat local US namesakes.
             // Level 3: unbiased Nominatim only if we have no geographic anchor at all.
             val viewport = parsed.viewportHint
             val origin = parsed.originCoord
                 ?: geocodeWithContext(parsed.origin, anchor = viewport)
                 ?: return@withContext Result.Failure("Could not locate: ${parsed.origin}")
             val dest = parsed.destCoord
-                ?: geocodeWithContext(parsed.dest, anchor = viewport ?: origin)
+                ?: geocodeWithContext(parsed.dest, anchor = viewport)
                 ?: return@withContext Result.Failure("Could not locate: ${parsed.dest}")
 
             Log.i(TAG, "resolveRoute — resolved origin=$origin dest=$dest")
@@ -276,11 +276,10 @@ class RouteRepository @Inject constructor(
      * Resolves a location string to coordinates.
      *
      * If [locationStr] is already a "lat,lon" pair, returns it directly.
-     * Otherwise calls Nominatim. When [anchor] is provided, the search is
-     * restricted to a ±2° bounding box around it (bounded=1), which forces
-     * Nominatim to only return results in the correct region — Nashville's
-     * Parthenon cannot be returned if the anchor is in Athens, Greece.
-     * Without an anchor the search is unbiased (last resort).
+     * Otherwise calls Nominatim. When [anchor] is provided, a ±2° viewbox is
+     * passed as a soft preference (bounded=0) so globally-important places
+     * (Athens, Greece; the Parthenon) still win over local namesakes even when
+     * the URL's viewport happens to be centred on the wrong continent.
      */
     private suspend fun geocodeWithContext(locationStr: String, anchor: LatLon? = null): LatLon? {
         val coordRegex = Regex("""^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$""")
@@ -292,13 +291,10 @@ class RouteRepository @Inject constructor(
             )
         }
 
-        val (viewbox, bounded) = if (anchor != null) {
+        val viewbox = if (anchor != null) {
             val d = 2.0
-            val box = "${anchor.lon - d},${anchor.lat + d},${anchor.lon + d},${anchor.lat - d}"
-            box to 1
-        } else {
-            null to null
-        }
+            "${anchor.lon - d},${anchor.lat + d},${anchor.lon + d},${anchor.lat - d}"
+        } else null
 
         return try {
             val results = nominatimService.search(
@@ -306,16 +302,9 @@ class RouteRepository @Inject constructor(
                 format = "json",
                 limit = 1,
                 viewbox = viewbox,
-                bounded = bounded,
+                bounded = null,
             )
-            // If bounded search returns nothing (place slightly outside ±2°), retry without.
-            val result = results.firstOrNull()
-                ?: if (bounded != null) {
-                    Log.w(TAG, "Bounded geocode for '$locationStr' returned nothing — retrying unbiased")
-                    nominatimService.search(query = locationStr, format = "json", limit = 1)
-                        .firstOrNull()
-                } else null
-            result?.let { LatLon(lat = it.lat.toDouble(), lon = it.lon.toDouble()) }
+            results.firstOrNull()?.let { LatLon(lat = it.lat.toDouble(), lon = it.lon.toDouble()) }
         } catch (e: Exception) {
             Log.e(TAG, "Geocoding failed for '$locationStr': ${e.message}")
             null
