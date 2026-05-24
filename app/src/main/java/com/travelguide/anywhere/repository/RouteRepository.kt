@@ -110,20 +110,21 @@ class RouteRepository @Inject constructor(
         return try {
             val request = Request.Builder().url(url).build()
             expandClient.newCall(request).execute().use { response ->
-                // Check every URL in the redirect chain — intermediate redirects
-                // often carry the full /dir/.../@lat,lon/data=... format even when
-                // the final page URL is stripped down.
-                var best: String? = null
+                // Log every URL in the redirect chain for debugging.
+                val chain = mutableListOf<String>()
                 var r: okhttp3.Response? = response
                 while (r != null) {
-                    val u = r.request.url.toString()
-                    if (u.contains("/@") || u.contains("data=")) {
-                        best = u
-                        break
-                    }
+                    chain.add(r.request.url.toString())
                     r = r.priorResponse
                 }
+                chain.reverse()  // oldest first
+                Log.i(TAG, "expandUrl — redirect chain (${chain.size} hops):")
+                chain.forEachIndexed { i, u -> Log.i(TAG, "  [$i] $u") }
+
+                // Pick the best URL: prefer one with @lat,lon or data= coordinates.
+                val best = chain.firstOrNull { it.contains("/@") || it.contains("data=") }
                 if (best != null) {
+                    Log.i(TAG, "expandUrl — using chain URL with coords: $best")
                     response.body?.close()
                     return@use best
                 }
@@ -133,8 +134,14 @@ class RouteRepository @Inject constructor(
                 val body = try {
                     response.body?.source()?.readUtf8(100_000) ?: ""
                 } catch (_: Exception) { "" }
+                Log.i(TAG, "expandUrl — HTML body length=${body.length}, first 500 chars: ${body.take(500)}")
 
                 val fullUrlFromHtml = extractUrlFromHtml(body)
+                if (fullUrlFromHtml != null) {
+                    Log.i(TAG, "expandUrl — extracted from HTML: $fullUrlFromHtml")
+                } else {
+                    Log.w(TAG, "expandUrl — no coords in redirect chain or HTML, using final: ${chain.lastOrNull()}")
+                }
                 fullUrlFromHtml ?: response.request.url.toString()
             }
         } catch (e: Exception) {
