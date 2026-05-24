@@ -110,13 +110,54 @@ class RouteRepository @Inject constructor(
         return try {
             val request = Request.Builder().url(url).build()
             expandClient.newCall(request).execute().use { response ->
-                response.body?.close()
-                response.request.url.toString()
+                // Check every URL in the redirect chain — intermediate redirects
+                // often carry the full /dir/.../@lat,lon/data=... format even when
+                // the final page URL is stripped down.
+                var best: String? = null
+                var r: okhttp3.Response? = response
+                while (r != null) {
+                    val u = r.request.url.toString()
+                    if (u.contains("/@") || u.contains("data=")) {
+                        best = u
+                        break
+                    }
+                    r = r.priorResponse
+                }
+                if (best != null) {
+                    response.body?.close()
+                    return@use best
+                }
+
+                // If no redirect URL had coordinates, scan the HTML response body
+                // for an og:url or canonical link that contains the full Maps URL.
+                val body = try {
+                    response.body?.source()?.readUtf8(100_000) ?: ""
+                } catch (_: Exception) { "" }
+
+                val fullUrlFromHtml = extractUrlFromHtml(body)
+                fullUrlFromHtml ?: response.request.url.toString()
             }
         } catch (e: Exception) {
             Log.w(TAG, "URL expansion failed, using original: ${e.message}")
             url
         }
+    }
+
+    private fun extractUrlFromHtml(html: String): String? {
+        if (html.isEmpty()) return null
+        // og:url meta tag — Google embeds the full canonical Maps URL here.
+        val ogRegex = Regex("""<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)""")
+        ogRegex.find(html)?.groupValues?.get(1)?.let { if (it.contains("/maps/")) return it }
+        // Reversed attribute order variant.
+        val ogAlt = Regex("""<meta[^>]+content=["']([^"']+)[^>]+property=["']og:url["']""")
+        ogAlt.find(html)?.groupValues?.get(1)?.let { if (it.contains("/maps/")) return it }
+        // Canonical link.
+        val canonical = Regex("""<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)""")
+        canonical.find(html)?.groupValues?.get(1)?.let { if (it.contains("/maps/")) return it }
+        // Last resort: any Google Maps /dir/ URL with an @ in it.
+        val dirUrl = Regex("""https://(?:www\.)?google\.\w+/maps/dir/[^"'\s]*@-?\d+\.\d+[^"'\s]*""")
+        dirUrl.find(html)?.value?.let { return it }
+        return null
     }
 
     private data class ParsedRoute(
