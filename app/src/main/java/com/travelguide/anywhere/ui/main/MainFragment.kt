@@ -47,7 +47,8 @@ class MainFragment : Fragment() {
     private var isFamousFirst = false
     private var tourIsActive = false
     private var blockModeChange = false
-    private var urlDebounceJob: Job? = null
+    private var searchDebounceJob: Job? = null
+    private var selectedLocationText: String? = null
     private var savedRadiusIndex = DEFAULT_RADIUS_INDEX
 
     @Inject lateinit var prefs: SharedPreferences
@@ -91,6 +92,7 @@ class MainFragment : Fragment() {
     private fun setupModeToggle() {
         binding.toggleMode.check(if (isTripMode) R.id.btn_mode_trip else R.id.btn_mode_live)
         binding.cardRoute.visibility = if (isTripMode) View.VISIBLE else View.GONE
+        updateIdleHint()
 
         binding.toggleMode.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
@@ -108,7 +110,15 @@ class MainFragment : Fragment() {
             if (wasTrip) viewModel.resetRoute()
             prefs.edit().putBoolean(PREF_TRIP_MODE, isTripMode).apply()
             binding.cardRoute.visibility = if (isTripMode) View.VISIBLE else View.GONE
+            updateIdleHint()
         }
+    }
+
+    private fun updateIdleHint() {
+        binding.tvIdle.text = if (isTripMode)
+            "Search for any location above, then tap Start Tour."
+        else
+            getString(R.string.idle_hint)
     }
 
     private fun setupSortToggle() {
@@ -208,7 +218,7 @@ class MainFragment : Fragment() {
                 val routeState = viewModel.routeParseState.value
                 if (routeState !is MainViewModel.RouteParseState.Ready) {
                     Toast.makeText(requireContext(),
-                        "Paste a valid Google Maps directions link first",
+                        "Search for and select a location first",
                         Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
@@ -231,20 +241,67 @@ class MainFragment : Fragment() {
         binding.btnPlacesCovered.setOnClickListener { PlacesBottomSheetFragment().show(childFragmentManager, "places") }
     }
 
-    // ── Route card ─────────────────────────────────────────────────────────────
+    // ── Location search card ───────────────────────────────────────────────────
 
     private fun setupRouteCard() {
         binding.etRouteUrl.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
-                urlDebounceJob?.cancel()
-                urlDebounceJob = viewLifecycleOwner.lifecycleScope.launch {
-                    delay(800L)
-                    viewModel.parseRoute(s?.toString()?.trim() ?: "")
+                val text = s?.toString()?.trim() ?: ""
+                // Suppress re-search when we just programmatically set the text after selection.
+                if (text == selectedLocationText) {
+                    selectedLocationText = null
+                    return
+                }
+                selectedLocationText = null
+                if (text.isBlank()) viewModel.resetRoute()
+                searchDebounceJob?.cancel()
+                searchDebounceJob = viewLifecycleOwner.lifecycleScope.launch {
+                    delay(300L)
+                    viewModel.searchLocations(text)
                 }
             }
         })
+    }
+
+    private fun updateLocationResults(results: List<com.travelguide.anywhere.data.model.LocationResult>) {
+        val container = binding.llLocationResults
+        container.removeAllViews()
+        if (results.isEmpty()) {
+            container.visibility = View.GONE
+            return
+        }
+        container.visibility = View.VISIBLE
+        val inflater = layoutInflater
+        results.forEachIndexed { index, result ->
+            if (index > 0) {
+                val divider = View(requireContext()).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1
+                    )
+                    setBackgroundColor(requireContext().getColor(R.color.stroke))
+                }
+                container.addView(divider)
+            }
+            val item = inflater.inflate(R.layout.item_location_result, container, false)
+            item.findViewById<android.widget.TextView>(R.id.tv_result_name).text = result.shortName
+            item.findViewById<android.widget.TextView>(R.id.tv_result_detail).text = result.displayName
+            item.setOnClickListener {
+                selectedLocationText = result.shortName
+                binding.etRouteUrl.setText(result.shortName)
+                binding.etRouteUrl.clearFocus()
+                hideKeyboard()
+                viewModel.selectLocation(result)
+            }
+            container.addView(item)
+        }
+    }
+
+    private fun hideKeyboard() {
+        val imm = requireContext().getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(binding.etRouteUrl.windowToken, 0)
     }
 
     private fun updateRouteStatus(state: MainViewModel.RouteParseState) {
@@ -254,7 +311,7 @@ class MainFragment : Fragment() {
             is MainViewModel.RouteParseState.Loading -> {
                 tv.visibility = View.VISIBLE
                 tv.setTextColor(requireContext().getColor(R.color.text_secondary))
-                tv.text = "Parsing route…"
+                tv.text = "Generating route…"
             }
             is MainViewModel.RouteParseState.Ready -> {
                 tv.visibility = View.VISIBLE
@@ -359,6 +416,7 @@ class MainFragment : Fragment() {
                     }
                 }}
                 launch { viewModel.routeParseState.collect { updateRouteStatus(it) } }
+                launch { viewModel.locationSearchResults.collect { updateLocationResults(it) } }
                 launch {
                     kokoroModelManager.state.collect { state ->
                         if (state is KokoroModelManager.DownloadState.Ready) {

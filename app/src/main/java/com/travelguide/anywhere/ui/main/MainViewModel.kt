@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
+import com.travelguide.anywhere.data.model.LocationResult
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.RouteData
 import com.travelguide.anywhere.repository.RouteRepository
@@ -60,19 +61,32 @@ class MainViewModel @Inject constructor(
     private val _routeParseState = MutableStateFlow<RouteParseState>(RouteParseState.Idle)
     val routeParseState: StateFlow<RouteParseState> = _routeParseState.asStateFlow()
 
-    private var parseJob: Job? = null
+    private val _locationSearchResults = MutableStateFlow<List<LocationResult>>(emptyList())
+    val locationSearchResults: StateFlow<List<LocationResult>> = _locationSearchResults.asStateFlow()
 
-    fun parseRoute(url: String) {
-        parseJob?.cancel()
-        if (url.isBlank()) {
-            _routeParseState.value = RouteParseState.Idle
+    private var parseJob: Job? = null
+    private var searchJob: Job? = null
+
+    fun searchLocations(query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _locationSearchResults.value = emptyList()
             return
         }
+        searchJob = viewModelScope.launch {
+            _locationSearchResults.value = routeRepository.searchLocations(query)
+        }
+    }
+
+    fun selectLocation(location: LocationResult) {
+        searchJob?.cancel()
+        _locationSearchResults.value = emptyList()
+        parseJob?.cancel()
         _routeParseState.value = RouteParseState.Loading
         parseJob = viewModelScope.launch {
-            _routeParseState.value = when (val result = routeRepository.resolveRoute(url)) {
-                is RouteRepository.Result.Success -> RouteParseState.Ready(result.route)
-                is RouteRepository.Result.Failure -> RouteParseState.Error(result.message)
+            _routeParseState.value = when (val r = routeRepository.resolveRouteFromLocation(location)) {
+                is RouteRepository.Result.Success -> RouteParseState.Ready(r.route)
+                is RouteRepository.Result.Failure -> RouteParseState.Error(r.message)
             }
         }
     }
@@ -86,7 +100,9 @@ class MainViewModel @Inject constructor(
 
     fun resetRoute() {
         parseJob?.cancel()
+        searchJob?.cancel()
         _routeParseState.value = RouteParseState.Idle
+        _locationSearchResults.value = emptyList()
     }
 
     fun startTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {

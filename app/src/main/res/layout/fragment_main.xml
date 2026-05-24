@@ -80,7 +80,7 @@
                 android:text="@string/mode_route" />
         </com.google.android.material.button.MaterialButtonToggleGroup>
 
-        <!-- Route URL card (visible only in Route mode) -->
+        <!-- Location search card (visible only in Trip mode) -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/card_route"
             android:layout_width="match_parent"
@@ -104,16 +104,25 @@
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Paste Google Maps directions link">
+                    android:hint="Search for any location…">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/et_route_url"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:inputType="textUri"
-                        android:maxLines="2"
-                        android:imeOptions="actionDone" />
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:imeOptions="actionSearch" />
                 </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- Search results list (shown while typing) -->
+                <LinearLayout
+                    android:id="@+id/ll_location_results"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="4dp"
+                    android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/tv_route_status"
@@ -122,7 +131,7 @@
                     android:layout_marginTop="8dp"
                     android:textSize="13sp"
                     android:visibility="gone"
-                    tools:text="Route ready: 5.2 mi, ~12m"
+                    tools:text="Route ready: 1.0 mi, ~20m"
                     tools:visibility="visible" />
 
             </LinearLayout>
