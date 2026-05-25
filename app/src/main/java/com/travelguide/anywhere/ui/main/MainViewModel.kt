@@ -91,11 +91,11 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun startRouteTour(radiusMiles: Float, apiKey: String) {
+    fun startRouteTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {
         val state = _routeParseState.value
         if (state !is RouteParseState.Ready) return
         TourGuideService.pendingRoute = state.route
-        startTour(radiusMiles, apiKey, famousMode = false)
+        startTour(radiusMiles, apiKey, famousMode)
     }
 
     fun resetRoute() {

@@ -222,7 +222,7 @@ class MainFragment : Fragment() {
                         Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                viewModel.startRouteTour(currentRadiusMiles(), apiKey)
+                viewModel.startRouteTour(currentRadiusMiles(), apiKey, isFamousFirst)
             } else {
                 viewModel.startTour(currentRadiusMiles(), apiKey, isFamousFirst)
             }

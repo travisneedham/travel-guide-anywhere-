@@ -11,8 +11,8 @@ interface NominatimService {
         @Query("q") query: String,
         @Query("format") format: String,
         @Query("limit") limit: Int,
+        @Query("accept-language") acceptLanguage: String = "en",
         @Query("viewbox") viewbox: String? = null,
-        // 1 = restrict results to inside the viewbox; omitted when viewbox is null.
         @Query("bounded") bounded: Int? = null,
     ): List<NominatimResult>
 

@@ -173,7 +173,7 @@ class PoiRepository @Inject constructor(
         )
         return PlaceOfInterest(
             osmId = osmId,
-            name = tags["name"] ?: "Unknown",
+            name = tags["name:en"] ?: tags["name"] ?: "Unknown",
             lat = effectiveLat,
             lon = effectiveLon,
             type = resolveType(tags),
