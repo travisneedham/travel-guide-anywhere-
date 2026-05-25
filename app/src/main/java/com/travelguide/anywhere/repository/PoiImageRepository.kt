@@ -30,6 +30,16 @@ class PoiImageRepository @Inject constructor(
                 val lang = wp.substring(0, colon)
                 val title = wp.substring(colon + 1)
                 if (!isGenericWikipediaTitle(title)) {
+                    if (lang == "en") {
+                        return@withContext "https://en.wikipedia.org/wiki/${title.replace(' ', '_')}"
+                    }
+                    // Non-English wikipedia tag — try Wikidata to get the English article.
+                    val wd = poi.tags["wikidata"]
+                    if (wd != null) {
+                        val englishUrl = fetchWikidataWikiUrl(wd)
+                        if (englishUrl != null) return@withContext englishUrl
+                    }
+                    // No English equivalent found — fall back to the local-language URL.
                     return@withContext "https://$lang.wikipedia.org/wiki/${title.replace(' ', '_')}"
                 }
             }

@@ -142,27 +142,29 @@ class PoiRepository @Inject constructor(
         ");\n" +
         "out body center;"
 
-    // Famous mode: only node+way types, no relations.
-    // - wikipedia: node only (way["wikipedia"] is slow — the tag has millions of OSM entries
-    //   and evaluating way bounding boxes against all of them is expensive even at small radii)
-    //   Also exclude administrative place nodes (cities, towns, etc.) which have wikipedia tags
-    //   but aren't attractions.
-    // - tourism/historic/heritage: node + way only (skip relations — large multipolygons like
-    //   university campuses or lakes mapped as relations cause query timeouts)
-    // - result cap 200: enough to find real famous places in metro areas while keeping response
-    //   size manageable; code sorts by fameScore afterwards.
+    // Famous mode query design notes:
+    // - Overpass returns results in element-type order: all nodes first, then ways, then
+    //   relations. A low cap fills entirely with nodes, leaving zero slots for ways/relations.
+    //   Major sites like the Acropolis of Athens are mapped as relations — they were invisible
+    //   at cap=200. Fix: require BOTH wikipedia+wikidata on the generic node query (eliminates
+    //   thousands of minor wikipedia-tagged nodes), require wikipedia on historic nodes/ways
+    //   (filters obscure features), and add relation["heritage"] for UNESCO sites (very few per
+    //   city, not a timeout risk). Cap raised to 500 with 45s timeout.
+    // - way["wikipedia"] is still excluded — millions of OSM ways carry wikipedia tags and
+    //   evaluating way bounding boxes against all of them is prohibitively slow.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:30];\n" +
+        "[out:json][timeout:45];\n" +
         "(\n" +
-        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"wikipedia\"][\"wikidata\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  relation[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
-        "out body center 200;"
+        "out body center 500;"
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
