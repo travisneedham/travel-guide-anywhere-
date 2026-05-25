@@ -433,8 +433,12 @@ class TourGuideService : LifecycleService() {
                 isGenerating = false
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Error in generation cycle", e)
                 isGenerating = false
+                // Guard: if the job was cancelled while a blocking HTTP call was in-flight,
+                // OkHttp throws IOException rather than CancellationException. Don't retry
+                // or post the error notification — the tour is stopping.
+                if (!isActive) return@launch
+                Log.e(TAG, "Error in generation cycle", e)
                 emitError(e.message ?: "Unknown error")
                 updateNotification("Error — retrying shortly...", true)
                 delay(15_000L)
@@ -805,6 +809,9 @@ class TourGuideService : LifecycleService() {
         currentPoiMeta.value = CurrentPoiMeta()
         emitState(TourState.IDLE)
         stopForeground(STOP_FOREGROUND_REMOVE)
+        // Belt-and-suspenders: explicitly dismiss the notification in case a racing
+        // coroutine re-posted it between stopForeground and service destruction.
+        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
         stopSelf()
     }
 
