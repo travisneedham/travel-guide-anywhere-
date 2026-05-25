@@ -282,6 +282,49 @@ immediately in `speak()` before `onStart()` — this is accurate and kept.
 
 ---
 
+## Android Auto: Sideloaded APK Setup
+
+### One-time setup on the phone
+
+Android Auto normally only shows apps installed from the Play Store. To allow sideloaded/debug
+APKs you must unlock developer mode:
+
+1. Open the **Android Auto** app on the phone
+2. Hamburger menu → **About**
+3. Tap the version number **10 times** — developer mode unlocks
+4. A **Developer options** section appears in the main settings
+5. Enable **"Allow apps from unknown sources"**
+
+### Each time a new APK is installed
+
+1. Install the APK — via ADB (`adb install -r app-debug.apk`) or download the artifact from
+   the GitHub Actions tab and tap to install on the phone
+2. Force-stop the Android Auto app and relaunch it (or restart the phone — Android Auto caches
+   its app list and won't pick up a new install until it rescans)
+3. Connect to the car or open the Android Auto phone screen — Travel Guide Anywhere should
+   appear under media apps
+
+The debug keystore is committed to the repo (`app/debug.keystore`, password `android`) so all
+APKs built by Android Studio or GitHub Actions are signed identically. Reinstalls never cause
+a signature conflict.
+
+### If the app doesn't appear
+
+- Confirm the APK installed: `adb shell pm list packages | grep travelguide`
+- Check for a startup crash: `adb logcat -s TourAutoMediaService`
+
+### How Android Auto integration works
+
+The app uses `MediaBrowserServiceCompat` (not the newer Car App Library). Android Auto discovers
+it via the `android.media.browse.MediaBrowserService` intent filter on `TourAutoMediaService`
+and the `automotive_app_desc.xml` resource declaring `<uses name="media"/>`.
+
+`TourAutoMediaService` bridges Android Auto controls (play/pause/skip/stop) to
+`TourGuideService` via its static StateFlows, and pushes playback state, track metadata, and
+POI artwork back to the car's head unit.
+
+---
+
 ## App Icon Update (pending)
 
 The current icon is a blue location pin with a microphone (from v3.0.0). The user wants to
