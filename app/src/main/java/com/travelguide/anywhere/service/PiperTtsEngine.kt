@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,7 +117,7 @@ class PiperTtsEngine(
                 } else {
                     savedJob?.cancel()
                     savedFile?.delete()
-                    generateWav(text, speechRate, "piper_", onProgress)
+                    generateWav(text, speechRate, "piper_")
                         ?: throw Exception("audio generation failed")
                 }
                 withContext(Dispatchers.Main) {
@@ -158,34 +157,14 @@ class PiperTtsEngine(
         text: String,
         speechRate: Float,
         prefix: String,
-        onProgress: ((Float) -> Unit)? = null,
     ): File? = withContext(genDispatcher) {
         val engine = tts ?: return@withContext null
         val outFile = File(context.cacheDir, "$prefix${UUID.randomUUID()}.wav")
-        // Piper VITS: ~25 ms per character on mid-range hardware. Since
-        // generateWithCallback is broken on Kotlin 2.x, run a ticker
-        // coroutine that estimates progress alongside the blocking generate().
-        val estimatedMs = (text.length * 25L / speechRate.coerceAtLeast(0.5f)).toLong()
-            .coerceAtLeast(500L)
-        val tickerJob = if (onProgress != null) {
-            val start = System.currentTimeMillis()
-            engineScope.launch {
-                while (isActive) {
-                    val elapsed = System.currentTimeMillis() - start
-                    val fraction = (elapsed.toFloat() / estimatedMs).coerceAtMost(0.95f)
-                    onProgress(fraction)
-                    kotlinx.coroutines.delay(150)
-                }
-            }
-        } else null
         try {
             engine.generate(text = text, sid = 0, speed = speechRate)
                 .save(outFile.absolutePath)
-            tickerJob?.cancel()
-            onProgress?.invoke(1.0f)
             outFile
         } catch (e: Exception) {
-            tickerJob?.cancel()
             Log.e(TAG, "Piper generate error: ${e.message}")
             outFile.delete()
             null
