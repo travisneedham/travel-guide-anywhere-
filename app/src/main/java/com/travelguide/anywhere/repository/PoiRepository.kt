@@ -6,6 +6,8 @@ import android.util.Log
 import com.google.gson.Gson
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.PoiType
+import com.travelguide.anywhere.data.remote.OpenTripMapService
+import com.travelguide.anywhere.data.remote.dto.OpenTripMapPlace
 import com.travelguide.anywhere.data.remote.dto.OverpassElement
 import com.travelguide.anywhere.data.remote.dto.OverpassResponse
 import kotlinx.coroutines.Dispatchers
@@ -20,12 +22,13 @@ import javax.inject.Singleton
 class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gson: Gson,
-    private val prefs: SharedPreferences
+    private val prefs: SharedPreferences,
+    private val openTripMapService: OpenTripMapService,
 ) {
     companion object {
         private const val TAG = "PoiRepository"
+        const val PREF_OPENTRIPMAP_KEY = "pref_opentripmap_key"
 
-        // Interest filter prefs — all true by default (all types shown).
         const val PREF_FILTER_HISTORIC         = "filter_historic"
         const val PREF_FILTER_MUSEUM           = "filter_museum"
         const val PREF_FILTER_ATTRACTION       = "filter_attraction"
@@ -34,12 +37,12 @@ class PoiRepository @Inject constructor(
         const val PREF_FILTER_PARK             = "filter_park"
         const val PREF_FILTER_PLACE_OF_WORSHIP = "filter_place_of_worship"
 
-        // OSM place= values that represent administrative/populated-place nodes.
-        // These often carry wikipedia/wikidata tags but are not tour-worthy attractions.
         private val ADMIN_PLACE_TYPES = setOf(
             "city", "town", "village", "hamlet", "suburb", "neighbourhood",
             "county", "state", "country", "region", "district", "municipality", "borough"
         )
+
+        private const val OTM_FALLBACK_THRESHOLD = 3
     }
 
     suspend fun fetchPois(
@@ -48,8 +51,111 @@ class PoiRepository @Inject constructor(
         famousMode: Boolean = false
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
+        val otmKey = prefs.getString(PREF_OPENTRIPMAP_KEY, "") ?: ""
+
+        if (otmKey.isNotBlank()) {
+            try {
+                val otmPois = fetchFromOpenTripMap(location, radiusMeters, famousMode, otmKey)
+                if (otmPois.size >= OTM_FALLBACK_THRESHOLD) {
+                    Log.d(TAG, "[OTM] Returning ${otmPois.size} POIs (famousMode=$famousMode)")
+                    return@withContext otmPois
+                }
+                Log.d(TAG, "[OTM] Only ${otmPois.size} results — falling back to Overpass")
+            } catch (e: Exception) {
+                Log.w(TAG, "[OTM] Failed: ${e.message} — falling back to Overpass")
+            }
+        }
+
+        fetchFromOverpass(location, radiusMeters, famousMode)
+    }
+
+    // ── OpenTripMap ──────────────────────────────────────────────────────────
+
+    private suspend fun fetchFromOpenTripMap(
+        location: Location,
+        radiusMeters: Int,
+        famousMode: Boolean,
+        apiKey: String,
+    ): List<PlaceOfInterest> {
+        val rate = if (famousMode) "2" else "1"
+        val places = openTripMapService.getPlacesInRadius(
+            radius = radiusMeters,
+            lon = location.longitude,
+            lat = location.latitude,
+            kinds = "interesting_places",
+            rate = rate,
+            limit = 50,
+            apiKey = apiKey,
+        )
+
+        Log.d(TAG, "[OTM] Raw response: ${places.size} places (rate>=$rate)")
+
+        val pois = places
+            .filter { it.name.isNotBlank() }
+            .map { it.toPlaceOfInterest(location) }
+            .filter { isTypeEnabled(it.type) }
+            .distinctBy { it.name }
+            .let { list ->
+                if (famousMode) list.sortedByDescending { it.fameScore }
+                else list.sortedBy { it.distanceMeters }
+            }
+
+        if (pois.isNotEmpty()) {
+            Log.d(TAG, "[OTM] Top POIs: " +
+                pois.take(5).joinToString { "${it.name}(rate=${it.tags["otm_rate"]})" })
+        }
+        return pois
+    }
+
+    private fun OpenTripMapPlace.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            userLocation.latitude, userLocation.longitude,
+            point.lat, point.lon,
+            results
+        )
+        val tags = buildMap {
+            wikidata?.let { put("wikidata", it) }
+            osm?.let { put("osm", it) }
+            kinds?.let { put("kinds", it) }
+            put("otm_rate", rate.toString())
+        }
+        return PlaceOfInterest(
+            osmId = osm ?: "otm/$xid",
+            name = name,
+            lat = point.lat,
+            lon = point.lon,
+            type = resolveTypeFromKinds(kinds),
+            tags = tags,
+            distanceMeters = results[0],
+        )
+    }
+
+    private fun resolveTypeFromKinds(kinds: String?): PoiType {
+        if (kinds == null) return PoiType.OTHER
+        val k = kinds.lowercase()
+        return when {
+            "museum" in k -> PoiType.MUSEUM
+            "archaeological" in k || "fortification" in k || "castle" in k -> PoiType.HISTORIC
+            "historic" in k || "monument" in k || "memorial" in k -> PoiType.HISTORIC
+            "religion" in k -> PoiType.PLACE_OF_WORSHIP
+            "view_point" in k -> PoiType.VIEWPOINT
+            "garden" in k || "park" in k || "natural" in k -> PoiType.PARK
+            "artwork" in k || "art_gallery" in k -> PoiType.ARTWORK
+            "cultural" in k || "architecture" in k || "tourist" in k -> PoiType.ATTRACTION
+            else -> PoiType.OTHER
+        }
+    }
+
+    // ── Overpass (fallback) ──────────────────────────────────────────────────
+
+    private suspend fun fetchFromOverpass(
+        location: Location,
+        radiusMeters: Int,
+        famousMode: Boolean,
+    ): List<PlaceOfInterest> {
         val mode = if (famousMode) "famous" else "nearby"
-        Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMiles}mi (${radiusMeters}m)")
+        Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMeters}m")
 
         val query = if (famousMode)
             buildFamousQuery(location.latitude, location.longitude, radiusMeters)
@@ -76,7 +182,6 @@ class PoiRepository @Inject constructor(
 
         val overpassResponse = gson.fromJson(responseJson, OverpassResponse::class.java)
 
-        // Overpass signals a timeout/error via the "remark" field while returning empty elements.
         if (!overpassResponse.remark.isNullOrBlank()) {
             Log.w(TAG, "[$mode] Overpass remark: ${overpassResponse.remark}")
             if (overpassResponse.elements.isEmpty()) {
@@ -88,14 +193,9 @@ class PoiRepository @Inject constructor(
         val pois = overpassResponse.elements
             .filter { it.tags.containsKey("name") }
             .filter { element ->
-                // Exclude retail/commercial shops (hardware stores, chain stores, etc.).
-                // Only allow through if they also carry a historic designation.
                 element.tags["shop"] == null || element.tags["historic"] != null
             }
             .filter { element ->
-                // Drop administrative place nodes (cities, towns, counties…).  They carry
-                // wikipedia/wikidata tags and would score 1000+ pts, drowning out actual
-                // attractions like museums and historic sites.
                 element.tags["place"]?.let { it !in ADMIN_PLACE_TYPES } ?: true
             }
             .map { element -> element.toPlaceOfInterest(location) }
@@ -106,13 +206,12 @@ class PoiRepository @Inject constructor(
                 else list.sortedBy { it.distanceMeters }
             }
 
-        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs (after place filter)")
+        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs")
         if (famousMode && pois.isNotEmpty()) {
             Log.d(TAG, "[famous] Top POIs by fame score: " +
                 pois.take(5).joinToString { "${it.name}(${it.fameScore})" })
         }
-
-        pois
+        return pois
     }
 
     private fun isTypeEnabled(type: PoiType): Boolean = when (type) {
@@ -126,9 +225,6 @@ class PoiRepository @Inject constructor(
         PoiType.OTHER            -> true
     }
 
-    // Nearby mode: all interesting POI types sorted by distance (closest first).
-    // Uses node+way only (no relation) — relations are complex multipolygons that cause
-    // 30-second Overpass timeouts at large radii, same reason as buildFamousQuery.
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:25];\n" +
         "(\n" +
@@ -142,16 +238,6 @@ class PoiRepository @Inject constructor(
         ");\n" +
         "out body center;"
 
-    // Famous mode query design notes:
-    // - Overpass returns results in element-type order: all nodes first, then ways, then
-    //   relations. A low cap fills entirely with nodes, leaving zero slots for ways/relations.
-    //   Major sites like the Acropolis of Athens are mapped as relations — they were invisible
-    //   at cap=200. Fix: require BOTH wikipedia+wikidata on the generic node query (eliminates
-    //   thousands of minor wikipedia-tagged nodes), require wikipedia on historic nodes/ways
-    //   (filters obscure features), and add relation["heritage"] for UNESCO sites (very few per
-    //   city, not a timeout risk). Cap raised to 500 with 45s timeout.
-    // - way["wikipedia"] is still excluded — millions of OSM ways carry wikipedia tags and
-    //   evaluating way bounding boxes against all of them is prohibitively slow.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:45];\n" +
         "(\n" +

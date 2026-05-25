@@ -564,6 +564,7 @@ class SettingsFragment : Fragment() {
     }
 
     private fun loadInterestFilters() {
+        binding.etOpentripmapKey.setText(prefs.getString(PoiRepository.PREF_OPENTRIPMAP_KEY, ""))
         binding.cbFilterHistoric.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_HISTORIC, true)
         binding.cbFilterMuseum.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_MUSEUM, true)
         binding.cbFilterAttraction.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ATTRACTION, true)
@@ -1017,6 +1018,7 @@ class SettingsFragment : Fragment() {
             .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
             .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
             .putInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, expiryDays)
+            .putString(PoiRepository.PREF_OPENTRIPMAP_KEY, binding.etOpentripmapKey.text?.toString()?.trim() ?: "")
             .putBoolean(PoiRepository.PREF_FILTER_HISTORIC, binding.cbFilterHistoric.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_MUSEUM, binding.cbFilterMuseum.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_ATTRACTION, binding.cbFilterAttraction.isChecked)

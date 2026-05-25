@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.gson.Gson
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.data.remote.NominatimService
+import com.travelguide.anywhere.data.remote.OpenTripMapService
 import com.travelguide.anywhere.data.remote.OsrmService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -83,6 +84,16 @@ object AppModule {
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(NominatimService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideOpenTripMapService(client: OkHttpClient, gson: Gson): OpenTripMapService =
+        Retrofit.Builder()
+            .baseUrl(OpenTripMapService.BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+            .create(OpenTripMapService::class.java)
 
     @Provides
     @Singleton
