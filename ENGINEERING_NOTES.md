@@ -325,6 +325,88 @@ POI artwork back to the car's head unit.
 
 ---
 
+## POI Discovery: Overpass Element-Ordering Problem and OpenTripMap Migration
+
+### The Overpass element-ordering problem (v3.2.9–v3.3.3)
+
+Overpass returns results in **element-type order**: all matching nodes first (sorted by OSM ID),
+then all ways, then all relations. A global result cap (`out body center 200` or `500`) fills
+entirely from nodes before a single way or relation gets a slot.
+
+In Athens at 10 miles, there are hundreds of `node["wikipedia"]` entries — minor churches,
+plaques, municipal buildings. The Acropolis of Athens is mapped as a **relation** (multipolygon)
+in OSM. With cap=200, it was never returned at all.
+
+### What was tried (v3.3.3)
+
+- Required both `["wikipedia"]["wikidata"]` on generic node queries → dramatically fewer nodes
+- Added `relation["heritage"]` to explicitly capture UNESCO World Heritage Sites
+- Required `["wikipedia"]` on historic node/way queries to filter noise
+- Raised cap to 500, timeout to 45s
+
+This helped dense cities but **broke small towns**: requiring `["wikipedia"]` on historic
+nodes filters out features like a 200-year-old courthouse that has `historic=building` but
+no Wikipedia article. The Overpass approach creates a fundamental tension between dense-city
+filtering and sparse-area coverage.
+
+### APIs evaluated as alternatives
+
+| API | Fame ranking | Max radius | API key? | Response time | Rural coverage |
+|---|---|---|---|---|---|
+| **Wikipedia GeoSearch** | None (distance only) | 10 km hard cap | No | Fast | Poor (no Wikipedia = no results) |
+| **Wikidata SPARQL** | Sitelinks count (excellent proxy) | Unlimited | No | 9–27s (degraded in 2026) | Same as Wikipedia |
+| **OpenTripMap** | `rate` field (3h/2h/1h/0) | Unlimited | Free key required | Fast | 10M+ global POIs, good |
+| **Overpass (current)** | None (custom fameScore) | Unlimited | No | 5–30s | Excellent (all OSM data) |
+| **Google Places** | Prominence score | 50 km | Paid ($$$) | Fast | Excellent |
+
+### Why OpenTripMap was chosen
+
+OpenTripMap is the only free API that provides a **built-in fame/notability ranking** (`rate`)
+with good global coverage including rural areas:
+
+- `rate=3h` — UNESCO/major world attraction (Acropolis, Colosseum)
+- `rate=2h` — well-known regional attraction
+- `rate=1h` — locally interesting (small-town museums, historic buildings)
+- `rate=0` — basic POI
+
+A single API call returns the top N most notable places within a radius, pre-ranked:
+```
+GET /0.1/en/places/radius?radius=16000&lon=23.7348&lat=37.9755
+  &kinds=interesting_places&rate=1h&format=geojson&limit=20&apikey=...
+```
+
+In Athens this returns Parthenon, Acropolis, National Museum at the top. In a small Illinois
+town it returns the 4–6 locally notable things without flooding with noise. The element-type
+ordering problem is eliminated entirely because OpenTripMap is not backed by raw OSM queries.
+
+**Free tier**: requires a free API key from `dev.opentripmap.org`. Same model as the existing
+Anthropic API key in app settings.
+
+### Architecture decision
+
+- **Both modes (Famous/Closest, Live/Trip):** Use OpenTripMap for POI discovery
+- **Overpass fallback:** If OpenTripMap returns < 3 results or the user hasn't set an
+  OpenTripMap API key, fall back to the existing Overpass query
+- **fameScore:** Still computed from OSM tags when using Overpass fallback; OpenTripMap results
+  use the `rate` field directly for ordering
+
+### Key files (after migration)
+
+- `PoiRepository.kt` — add `fetchPoisFromOpenTripMap()`, keep `fetchPois()` (Overpass) as
+  fallback, add orchestration logic
+- `AppModule.kt` — add Retrofit service for OpenTripMap
+- `MainFragment.kt` / settings UI — add OpenTripMap API key preference
+- `PlaceOfInterest.kt` — map OpenTripMap `rate` field to fameScore-compatible value
+
+### What stays the same
+
+- Overpass is still used for nearby-mode fallback (distance-sorted, no fame ranking needed)
+- `NarrationRepository` and Claude prompt pipeline are unchanged — they consume
+  `PlaceOfInterest` regardless of source
+- `MentionedPlacesStore` deduplication works on POI name, which both sources provide
+
+---
+
 ## App Icon Update (pending)
 
 The current icon is a blue location pin with a microphone (from v3.0.0). The user wants to
