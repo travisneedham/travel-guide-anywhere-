@@ -184,6 +184,104 @@ an even simpler fix — just verify the raw text before attempting Option A.
 
 ---
 
+## Trip Mode: Location Search + Auto-Route (replaces Google Maps URL parsing)
+
+### Why URL parsing was abandoned
+
+All five attempts to correctly geocode Google Maps share-links failed (see "Parthenon Bug"
+section above). The root problem is unsolvable without a Google Places API key: short-link
+expansions give us only human-readable place names and the user's device viewport — not the
+actual route coordinates.
+
+### New approach (v3.2.9+)
+
+- **Location search box** replaces the URL paste field. User types any place name; the app
+  calls Nominatim with `limit=5` and shows a labelled list (e.g. "Parthenon, Athens, Attica,
+  Greece" vs "Parthenon, Nashville, Tennessee, US"). User taps the correct one — disambiguation
+  is now done by the human, not an algorithm.
+- **Auto-route generation**: Once a location is selected, the app picks one of 8 cardinal
+  directions (N/NE/E/SE/S/SW/W/NW) at random, computes a destination 1 mile away using the
+  haversine `destinationPoint` formula, then calls the OSRM public walking-profile server to
+  get real footpath waypoints between the two coordinates.
+- **Key files:** `RouteRepository.kt` (search + OSRM), `LocationResult.kt` (data model),
+  `item_location_result.xml` (list item layout), `MainViewModel.kt` (`searchLocations` /
+  `selectLocation`), `MainFragment.kt` (`updateLocationResults` / debounced TextWatcher).
+
+---
+
+## Loading Spinner Implementation
+
+### Architecture
+
+`TourGuideService.loadingProgress: MutableStateFlow<Float>(-1f)` is the single source of truth.
+
+- **`-1f`** → spinner is indeterminate (spinning circle, no fill)
+- **`0.0–1.0`** → spinner is determinate (arc fills to that fraction)
+
+`MainFragment` observes `combine(tourState, loadingProgress)` and toggles
+`CircularProgressIndicator.isIndeterminate` accordingly.
+
+When `speakNarration()` starts, TourGuideService sets `loadingProgress = -1f` and passes
+`onProgress = { fraction -> loadingProgress.value = fraction }` to `engine.speak()`. Each
+engine decides whether/how to call `onProgress`.
+
+---
+
+### Per-engine spinner behaviour
+
+#### Kokoro TTS — determinate, chunk-based (accurate)
+
+Kokoro uses an adaptive chunking pipeline: it splits narration into ~200-char chunks and
+generates them in sequence while playing. After each chunk it runs `computeAdaptiveBufN()` to
+project whether enough chunks are buffered for gapless playback.
+
+- While buffering: `onProgress((i+1).toFloat() / needed.coerceAtLeast(i+2))` — arc grows chunk by chunk
+- When buffer threshold is met: `onProgress(1.0f)` — arc completes; `onStart()` fires, playback begins
+- If prewarmed: `onProgress(1.0f)` immediately (all chunks were already generated)
+
+This is the original v2.4.5 implementation and still works correctly.
+
+#### OpenAI TTS — determinate, byte-streaming (accurate)
+
+`fetchAudio()` reads the HTTP response in 8 KB chunks and reports
+`onProgress(bytesRead / contentLength)` on each read. The `Content-Length` response header from
+OpenAI's TTS endpoint is reliable, so the arc tracks real download progress closely.
+
+- If no `Content-Length` header: reads all bytes at once, calls `onProgress(1.0f)` when done
+- If prewarmed: `onProgress(1.0f)` immediately
+
+This is the original v2.4.5 implementation and is already in the current codebase.
+
+#### Piper TTS — indeterminate (v3.3.0+)
+
+Piper uses sherpa-onnx's `OfflineTts.generate()`, which is a single blocking call — no
+callbacks, no incremental output. The sherpa-onnx API does have a `generateWithCallback`
+variant that fires per-sample, but **this is broken on Kotlin 2.x**: the JNI callback from the
+C++ thread is incompatible with Kotlin 2.x coroutine dispatchers and causes crashes.
+
+**History of failed progress estimators for Piper:**
+
+- **v3.1.7 (time-based):** Estimated total duration as `text.length × 25ms / speechRate`,
+  ran a 150ms ticker coroutine that reported `elapsed/estimated`. Worked on the calibration
+  device (Samsung SM-F766U1) but over-estimated on faster hardware.
+- **v3.2.3–v3.2.9 (25ms/char ticker):** Same ticker with slightly different constants. On the
+  user's device, synthesis completes well before the estimate — circle stalls at 3–20% and
+  then audio starts playing while the circle is still partially filled.
+
+**Resolution (v3.3.0):** Remove the ticker entirely. `loadingProgress` stays at `-1f` throughout
+Piper synthesis → spinner is a plain spinning circle. No fake progress is better than wrong
+progress.
+
+Exception: when prewarmed audio is used (synthesis already done), `onProgress(1.0f)` still fires
+immediately in `speak()` before `onStart()` — this is accurate and kept.
+
+#### Android TTS — always indeterminate
+
+`AndroidTtsEngine` uses the system TTS engine, which provides no synthesis progress callbacks.
+`onProgress` is never called → always indeterminate. This is correct and intentional.
+
+---
+
 ## App Icon Update (pending)
 
 The current icon is a blue location pin with a microphone (from v3.0.0). The user wants to
