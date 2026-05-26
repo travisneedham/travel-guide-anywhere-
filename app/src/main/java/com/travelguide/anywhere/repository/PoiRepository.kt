@@ -225,8 +225,11 @@ class PoiRepository @Inject constructor(
         PoiType.OTHER            -> true
     }
 
-    private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:25];\n" +
+    private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String {
+        // Cap nearby results to avoid Overpass timeout/OOM at large radii (e.g. 40mi DFW metro).
+        // 500 gives plenty of variety for nearest-first sorting without overwhelming the server.
+        val cap = if (radiusMeters > 30_000) 500 else 300
+        return "[out:json][timeout:45];\n" +
         "(\n" +
         "  node[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
@@ -236,12 +239,14 @@ class PoiRepository @Inject constructor(
         "  way[\"name\"][\"leisure\"=\"park\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"amenity\"=\"place_of_worship\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
-        "out body center;"
+        "out body center $cap;"
+    }
 
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:45];\n" +
         "(\n" +
-        "  node[\"name\"][\"wikipedia\"][\"wikidata\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
+        // Any named node with a wikipedia page (no wikidata required — fameScore handles ranking)
+        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +

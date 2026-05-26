@@ -17,22 +17,27 @@ data class PlaceOfInterest(
         // Cross-wiki presence
         if (tags.containsKey("wikipedia")) score += 1000
         if (tags.containsKey("wikidata")) score += 500
-        // UNESCO World Heritage (heritage=1) and national/regional designations
+        // UNESCO World Heritage (heritage=1) and national/regional designations.
+        // heritage=2 is national-register level — locally significant, not globally notable, so moderate bonus.
         when (tags["heritage"]) {
             "1" -> score += 2000
-            "2" -> score += 800
-            "3" -> score += 400
+            "2" -> score += 500
+            "3" -> score += 200
         }
-        // Tourism type bonuses
-        if (tags["tourism"] == "attraction") score += 200
-        if (tags["tourism"] == "museum") score += 150
+        // Tourism sites are purpose-built attractions and outrank incidental civic landmarks
+        if (tags["tourism"] == "museum") score += 350
+        if (tags["tourism"] == "attraction") score += 300
+        if (tags["tourism"] == "zoo" || tags["tourism"] == "theme_park") score += 250
         // Documentation richness signals
         if (tags.containsKey("wikimedia_commons")) score += 100
         if (tags.containsKey("image")) score += 50
         if (tags["fee"] == "yes") score += 75
         if (tags.containsKey("opening_hours")) score += 50
-        // Historic type specificity
-        if (tags["historic"] in setOf("castle", "archaeological_site")) score += 80
+        // Historic type specificity — archaeological/castle sites are major draws
+        if (tags["historic"] in setOf("castle", "archaeological_site", "ruins")) score += 150
+        if (tags["historic"] in setOf("monument", "memorial")) score += 80
+        // Civic/administrative historic types are locally notable but rarely tourist destinations
+        if (tags["historic"] in setOf("courthouse", "building", "manor", "farm", "mill", "bridge")) score -= 200
         return score
     }
 
