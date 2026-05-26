@@ -77,18 +77,29 @@ class PoiRepository @Inject constructor(
         famousMode: Boolean,
         apiKey: String,
     ): List<PlaceOfInterest> {
-        val rate = if (famousMode) "2" else "1"
+        // Famous mode: ask OTM to sort by rate so the TOP-rated places in the radius are
+        // returned first (not the nearest ones). Without orderby=rate, OTM defaults to
+        // distance order — at 40mi, that means local suburban POIs dominate the 100-result
+        // window and globally famous places (e.g. JFK Museum in Dallas) are never reached.
+        //
+        // Kinds broadened from just "interesting_places" to also include "museums" and
+        // "historic" — some OTM entries are only tagged with a sub-kind and wouldn't be
+        // returned by the parent kind alone.
+        //
+        // Rate filter set to "1" (lowest) for both modes so we don't accidentally exclude
+        // famous places that OTM happens to rate low. Sorting handles priority instead.
         val places = openTripMapService.getPlacesInRadius(
             radius = radiusMeters,
             lon = location.longitude,
             lat = location.latitude,
-            kinds = "interesting_places",
-            rate = rate,
-            limit = 50,
+            kinds = "interesting_places,museums,historic,architecture",
+            rate = "1",
+            orderby = if (famousMode) "rate" else "dist",
+            limit = 100,
             apiKey = apiKey,
         )
 
-        Log.d(TAG, "[OTM] Raw response: ${places.size} places (rate>=$rate)")
+        Log.d(TAG, "[OTM] Raw response: ${places.size} places (famousMode=$famousMode, orderby=${if (famousMode) "rate" else "dist"})")
 
         val pois = places
             .filter { it.name.isNotBlank() }
@@ -96,13 +107,13 @@ class PoiRepository @Inject constructor(
             .filter { isTypeEnabled(it.type) }
             .distinctBy { it.name }
             .let { list ->
-                if (famousMode) list.sortedByDescending { it.fameScore }
+                if (famousMode) list.sortedByDescending { it.tags["otm_rate"]?.toIntOrNull() ?: 0 }
                 else list.sortedBy { it.distanceMeters }
             }
 
         if (pois.isNotEmpty()) {
             Log.d(TAG, "[OTM] Top POIs: " +
-                pois.take(5).joinToString { "${it.name}(rate=${it.tags["otm_rate"]})" })
+                pois.take(5).joinToString { "${it.name}(otm_rate=${it.tags["otm_rate"]}, dist=${"%.1f".format(it.distanceMiles)}mi)" })
         }
         return pois
     }

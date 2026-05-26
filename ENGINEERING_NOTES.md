@@ -407,6 +407,78 @@ Anthropic API key in app settings.
 
 ---
 
+## OpenTripMap Integration: Bugs Found and Fixed (v3.3.7)
+
+### Bug 1: Results sorted by distance instead of fame
+
+**Symptom:** From Denton TX at 40mi radius in famous mode, the app returned a local Denton
+monument instead of JFK Museum / Reunion Tower in Dallas.
+
+**Root cause:** OTM's `/places/radius` endpoint defaults to `orderby=dist` (nearest first). With
+limit=50, the 50 results are the 50 closest notable places to the query center. At 40mi, this
+means suburban Denton/Frisco POIs fill the window before Dallas is reached. JFK Museum (35mi
+from Denton) may not appear at all in the first 50 distance-ordered results.
+
+**Fix:** Add `orderby=rate` to the API call for famous mode. This makes OTM return the
+highest-rated places within the radius first, regardless of distance. Limit raised to 100 to
+give a larger candidate pool. For nearby mode, keep `orderby=dist`.
+
+### Bug 2: Client-side sort by fameScore was meaningless for OTM results
+
+**Symptom:** Even after OTM returned results, the final ordering was wrong.
+
+**Root cause:** `fameScore` is computed from OSM tags like `wikipedia`, `heritage`, etc. OTM
+results only have `wikidata`, `kinds`, and `otm_rate` in their tags — they never have
+`wikipedia` or `heritage` because we don't fetch those from OTM. So every OTM result collapses
+to nearly the same fameScore (≈ `type.interestScore + 500`), and the "sort by fameScore" is
+effectively a no-op. Results come out in whatever order OTM returned them (distance order).
+
+**Fix:** Sort OTM famous-mode results by `otm_rate` (the actual OTM rate value stored in tags).
+`fameScore` continues to be used only for the Overpass fallback path, where full OSM tags are
+available.
+
+### Bug 3: kinds=interesting_places may exclude some museums
+
+**Symptom:** Some OTM entries (e.g. museums) that are only tagged with a sub-kind may not be
+returned when filtering by the parent kind alone.
+
+**Fix:** Query with `kinds=interesting_places,museums,historic,architecture` to catch entries
+that OTM has tagged only with a more specific category.
+
+### Bug 4: rate=2 filter may exclude valid tourist destinations
+
+**Symptom:** Not directly observed, but if JFK Museum has OTM rate=1, the `rate=2` filter
+in famous mode would silently drop it.
+
+**Fix:** Set `rate=1` (minimum) for both modes. The `orderby=rate` + client-side sort by
+`otm_rate` ensures the highest-rated places still appear first; a strict minimum filter is not
+needed when the data is already sorted by rate.
+
+### OTM rate field: two different scales (important)
+
+The OTM API uses `rate` in TWO different ways that can be confused:
+
+| Context | Scale | Example |
+|---|---|---|
+| `rate` **query parameter** (filter) | `"1"`, `"2"`, `"3"` (or `"1h"`, `"2h"`, `"3h"`) | `rate=2` means return places with OTM importance ≥ 2 |
+| `rate` **response field** (per place) | Integer 0–7, based on Wikipedia quality score | `rate=7` = well-documented Wikipedia article (10+ languages) |
+
+These are different metrics. A local monument can have response `rate=7` (many Wikipedia
+sitelinks) while also having query filter `rate=1` (locally interesting only). Do not confuse
+them.
+
+### Current OTM call parameters (v3.3.7, do not change without good reason)
+
+```
+kinds   = "interesting_places,museums,historic,architecture"
+rate    = "1"           ← minimum filter; sorting handles priority
+orderby = "rate"        ← famous mode: TOP-rated in radius first
+          "dist"        ← nearby mode: nearest first
+limit   = 100           ← larger pool at 40mi radius
+```
+
+---
+
 ## Overpass Fallback: Frozen at v3.3.2 Logic
 
 ### The problem this note prevents
@@ -425,6 +497,12 @@ Overpass is the **fallback only**. It runs when:
 
 When an OpenTripMap key is present and OTM returns ≥ 3 results, Overpass is never called.
 All ordering/ranking problems at that point are an **OTM problem**, not an Overpass problem.
+
+### Verified correct in v3.3.6
+
+The Overpass fallback logic (queries + fameScore) was user-verified correct in v3.3.6 from Denton
+TX at 40mi radius. JFK Museum ranked above Denton County Courthouse; nearby mode completed without
+timeout. **Leave this logic alone.** If ordering is wrong, get an OTM key.
 
 ### The reference queries (v3.3.2, do not modify)
 

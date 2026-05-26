@@ -13,6 +13,7 @@ interface OpenTripMapService {
         @Query("lat") lat: Double,
         @Query("kinds") kinds: String? = null,
         @Query("rate") rate: String? = null,
+        @Query("orderby") orderby: String? = null,
         @Query("format") format: String = "json",
         @Query("limit") limit: Int = 50,
         @Query("apikey") apiKey: String,
