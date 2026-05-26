@@ -407,14 +407,15 @@ Anthropic API key in app settings.
 
 ---
 
-## Overpass Fallback: Treat as Frozen Reference Implementation
+## Overpass Fallback: Frozen at v3.3.2 Logic
 
 ### The problem this note prevents
 
 Every session that touches famous-mode or nearby-mode ordering ends up modifying the Overpass
-queries. The result is a cycle of regressions: a fix for Athens breaks Denton, a fix for Denton
-breaks Athens. **Stop.** The Overpass queries are now considered a frozen reference
-implementation. Modifying them is almost never the right answer.
+queries or `fameScore`. The result is a cycle of regressions: a fix for Athens breaks Denton, a
+fix for Denton breaks Athens. **Stop.** The Overpass queries and `fameScore` values are frozen
+at the v3.3.2 state, which is the last version where user-verified correct results were produced
+(JFK Museum ranked above Denton County Courthouse, etc.).
 
 ### When Overpass runs
 
@@ -425,12 +426,12 @@ Overpass is the **fallback only**. It runs when:
 When an OpenTripMap key is present and OTM returns ≥ 3 results, Overpass is never called.
 All ordering/ranking problems at that point are an **OTM problem**, not an Overpass problem.
 
-### The stable queries (v3.3.5+, do not modify)
+### The reference queries (v3.3.2, do not modify)
 
 #### Nearby mode
 
 ```
-[out:json][timeout:45];
+[out:json][timeout:45];    ← timeout raised from 25s (latent bug fix, not a logic change)
 (
   node["name"]["historic"](around:R,LAT,LON);
   way["name"]["historic"](around:R,LAT,LON);
@@ -440,74 +441,74 @@ All ordering/ranking problems at that point are an **OTM problem**, not an Overp
   way["name"]["leisure"="park"](around:R,LAT,LON);
   node["name"]["amenity"="place_of_worship"](around:R,LAT,LON);
 );
-out body center CAP;   ← 300 for ≤30km radius, 500 for larger
+out body center CAP;   ← cap added (latent bug fix): 300 for ≤30km, 500 for larger
 ```
 
-**Why the cap matters:** Without a cap, `out body center;` at 40 miles in DFW returns tens of
-thousands of elements and exceeds Overpass's 25-second timeout, producing "Overpass query
-failed" errors in a retry loop. This was a latent bug that was always in the code; fixing it
-is not a query redesign.
+**Why the cap is a bug fix, not a logic change:** v3.3.2 had `out body center;` with no cap.
+At 40 miles in DFW, this returns tens of thousands of elements and exceeds Overpass's timeout,
+producing "Overpass query failed" errors in a retry loop. Adding the cap restores the same
+behaviour that smaller radii already had — it does not change what POIs are selected or how
+they are ordered.
 
 #### Famous mode
 
 ```
-[out:json][timeout:45];
+[out:json][timeout:30];
 (
-  node["name"]["wikipedia"][!"shop"]["place"!~"city|town|..."](around:R,LAT,LON);
+  node["name"]["wikipedia"][!"shop"]["place"!~"city|town|village|hamlet|suburb|county|state|
+      country|region|district|municipality|borough"](around:R,LAT,LON);
   node["name"]["tourism"~"attraction|museum|zoo|theme_park|aquarium|gallery"](around:R,LAT,LON);
   way["name"]["tourism"~"attraction|museum|zoo|theme_park|aquarium|gallery"](around:R,LAT,LON);
   node["name"]["heritage"](around:R,LAT,LON);
   way["name"]["heritage"](around:R,LAT,LON);
-  relation["name"]["heritage"](around:R,LAT,LON);
-  node["name"]["historic"~"castle|monument|archaeological_site|ruins|memorial"]["wikipedia"](around:R,LAT,LON);
-  way["name"]["historic"~"castle|monument|archaeological_site|ruins|memorial"]["wikipedia"](around:R,LAT,LON);
+  node["name"]["historic"~"castle|monument|archaeological_site|ruins|memorial"](around:R,LAT,LON);
+  way["name"]["historic"~"castle|monument|archaeological_site|ruins|memorial"](around:R,LAT,LON);
 );
-out body center 500;
+out body center 200;
 ```
 
-**Key design choices (do not re-litigate):**
+**What was tried and regressed (do not repeat):**
 
-- First branch requires only `wikipedia`, NOT `wikidata`. Adding `["wikidata"]` as a filter
-  (done in v3.3.3) silently drops real tourist destinations that have a Wikipedia article but
-  haven't been linked to Wikidata in OSM yet. `wikidata` is a bonus in `fameScore`, not a gate.
-- Tourism nodes (`museum`, `attraction`, etc.) have NO `wikipedia` requirement — these tags
-  already signal a place is a tourist destination.
-- Heritage relations are explicitly included to catch UNESCO World Heritage complexes (Acropolis,
-  etc.) which are mapped as OSM relations, not nodes, and would otherwise be excluded by the
-  element-type ordering problem.
-- Result cap is 500. Overpass fills caps in node→way→relation order, so without the explicit
-  `relation["heritage"]` branch, relations would never appear.
+- **v3.3.3: Added `["wikidata"]` to the first branch** — silently dropped tourist destinations
+  that have a Wikipedia article but no Wikidata link in OSM. JFK Museum was likely lost here.
+  **Reverted.**
+- **v3.3.3: Added `["wikipedia"]` requirement to historic nodes** — broke small-town content
+  (e.g. 200-year-old courthouse that has `historic=building` but no Wikipedia article).
+  **Reverted.**
+- **v3.3.3: Added `relation["heritage"]`** — intended to capture the Acropolis (an OSM
+  relation). But the Acropolis problem is solved by OTM; the Overpass fallback doesn't need to
+  handle this edge case. **Reverted.**
+- **v3.3.5 (incorrect): Changed fameScore** — raised museum/attraction bonuses, cut heritage=2
+  bonus, added courthouse penalty. This was an attempt to fix ranking without understanding why
+  v3.3.2 ranked correctly. **Reverted to v3.3.2 values.**
 
-### Why ordering problems look like query problems (they're not)
+### Reference fameScore values (v3.3.2, do not modify)
 
-When famous mode returns a courthouse instead of JFK Museum, the instinct is to tighten the
-query. **Resist this.** The query's job is to fetch candidates; `fameScore` in `PlaceOfInterest.kt`
-is what ranks them. Debugging steps:
+```kotlin
+type.interestScore      // HISTORIC=100, MUSEUM=90, ATTRACTION=80, ARTWORK=70, VIEWPOINT=70,
+                        // PLACE_OF_WORSHIP=60, PARK=50, OTHER=30
+wikipedia tag:   +1000
+wikidata tag:    +500
+heritage=1:      +2000  (UNESCO World Heritage)
+heritage=2:      +800   (national designation)
+heritage=3:      +400   (regional designation)
+tourism=attraction: +200
+tourism=museum:  +150
+wikimedia_commons: +100
+fee=yes:         +75
+opening_hours:   +50
+historic=castle or archaeological_site: +80
+```
 
-1. Add a log line printing all returned POIs and their fameScores
-2. Is the "wrong" POI even in the results? If not → query problem (rare)
-3. Is it in the results but ranked higher than expected? → fameScore problem (common)
+With these values:
+- JFK Museum (MUSEUM=90 + wikipedia=1000 + wikidata=500 + museum=150 + fee=75 + hours=50) = **1865**
+- Denton Courthouse (HISTORIC=100 + wikipedia=1000 + wikidata=500) = **1600** ← loses correctly
 
-`fameScore` knobs (v3.3.5 calibration):
-- `wikipedia` tag: +1000
-- `wikidata` tag: +500
-- `heritage=1` (UNESCO): +2000
-- `heritage=2` (national register): +500 — deliberately modest; national landmark ≠ globally famous
-- `tourism=museum`: +350
-- `tourism=attraction`: +300
-- `historic=castle/archaeological_site/ruins`: +150
-- `historic=courthouse/building/manor/farm/mill/bridge`: **−200** — civic/admin sites that are locally
-  notable but rarely tourist destinations
+### Do not add complexity to the Overpass fallback
 
-This calibration makes purpose-built tourism sites (JFK Museum, Reunion Tower) outrank incidental
-civic landmarks (Denton County Courthouse) even when the civic site has heritage tags from the
-US National Register of Historic Places.
-
-### Do not add complexity to the fallback to match OTM behaviour
-
-The Overpass fallback is not supposed to be as good as OpenTripMap. It is a degraded-mode
-safety net. If Overpass returns suboptimal ordering in an unusual location, the correct fix is
-to get an OpenTripMap API key — not to redesign the Overpass queries.
+The Overpass fallback is a degraded-mode safety net, not a replacement for OpenTripMap. If
+Overpass returns suboptimal ordering for a specific location (e.g. Athens), the correct fix is
+for the user to set an OpenTripMap API key — not to redesign the Overpass queries or fameScore.
 
 ---
 

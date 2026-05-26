@@ -225,9 +225,9 @@ class PoiRepository @Inject constructor(
         PoiType.OTHER            -> true
     }
 
+    // v3.3.2 reference query — do not modify. See ENGINEERING_NOTES.md.
+    // Cap added (not in v3.3.2) to fix latent timeout/OOM at large radii (e.g. 40mi metro areas).
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String {
-        // Cap nearby results to avoid Overpass timeout/OOM at large radii (e.g. 40mi DFW metro).
-        // 500 gives plenty of variety for nearest-first sorting without overwhelming the server.
         val cap = if (radiusMeters > 30_000) 500 else 300
         return "[out:json][timeout:45];\n" +
         "(\n" +
@@ -242,20 +242,19 @@ class PoiRepository @Inject constructor(
         "out body center $cap;"
     }
 
+    // v3.3.2 reference query — do not modify. See ENGINEERING_NOTES.md.
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:45];\n" +
+        "[out:json][timeout:30];\n" +
         "(\n" +
-        // Any named node with a wikipedia page (no wikidata required — fameScore handles ranking)
         "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  relation[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
-        "out body center 500;"
+        "out body center 200;"
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
