@@ -1,5 +1,7 @@
 package com.travelguide.anywhere.data.model
 
+import kotlin.math.pow
+
 data class PlaceOfInterest(
     val osmId: String,        // e.g. "node/123456"
     val name: String,
@@ -11,30 +13,33 @@ data class PlaceOfInterest(
 ) {
     val distanceMiles: Float get() = distanceMeters / 1609.34f
 
-    // Higher score = more notable. wikipedia/wikidata and heritage tags are the strongest signals.
-    // This score is Overpass-oriented — OSM tags only. OTM POIs carry otm_rate instead; do not
-    // use fameScore to rank OTM results.
+    // Higher score = more notable. Enriched with Wikipedia pageviews (wiki_views tag) and
+    // Wikidata sitelinks (wiki_sitelinks tag) for a continuous signal. Heritage and wiki
+    // enrichment are the strongest signals. OTM POIs use otm_rate instead — do not use
+    // fameScore to rank OTM results.
     val fameScore: Int get() {
         var score = type.interestScore
-        // Cross-wiki presence
-        if (tags.containsKey("wikipedia")) score += 1000
-        if (tags.containsKey("wikidata")) score += 500
-        // UNESCO World Heritage (heritage=1) and national/regional designations
         when (tags["heritage"]) {
-            "1" -> score += 2000
-            "2" -> score += 800
-            "3" -> score += 400
+            "1" -> score += 1000
+            "2" -> score += 400
+            "3" -> score += 200
         }
-        // Tourism type bonuses
-        if (tags["tourism"] == "attraction") score += 200
-        if (tags["tourism"] == "museum") score += 150
-        // Documentation richness signals
-        if (tags.containsKey("wikimedia_commons")) score += 100
-        if (tags.containsKey("image")) score += 50
-        if (tags["fee"] == "yes") score += 75
-        if (tags.containsKey("opening_hours")) score += 50
-        // Historic type specificity
-        if (tags["historic"] in setOf("castle", "archaeological_site")) score += 80
+        if (tags["tourism"] == "attraction") score += 100
+        if (tags["tourism"] == "museum") score += 75
+        if (tags.containsKey("wikimedia_commons")) score += 40
+        if (tags["fee"] == "yes") score += 35
+        if (tags.containsKey("opening_hours")) score += 25
+        if (tags.containsKey("image")) score += 20
+        if (tags["historic"] in setOf("castle", "archaeological_site")) score += 50
+        val views = tags["wiki_views"]?.toLongOrNull() ?: 0L
+        if (views > 0L) score += (views.toDouble().pow(0.57) * 8.06).toInt()
+        val sitelinks = tags["wiki_sitelinks"]?.toIntOrNull() ?: 0
+        score += sitelinks * 35
+        // Fallback for places not yet enriched: use tag presence as a weak signal
+        if (views == 0L && sitelinks == 0) {
+            if (tags.containsKey("wikipedia")) score += 500
+            else if (tags.containsKey("wikidata")) score += 150
+        }
         return score
     }
 
@@ -44,12 +49,16 @@ data class PlaceOfInterest(
         val amenity = tags["amenity"]
         val building = tags["building"]
         val leisure = tags["leisure"]
+        val natural = tags["natural"]
+        val place = tags["place"]
         return when {
             historic != null -> historic.replace("_", " ").replaceFirstChar { it.uppercase() }
             tourism != null -> tourism.replace("_", " ").replaceFirstChar { it.uppercase() }
             amenity != null -> amenity.replace("_", " ").replaceFirstChar { it.uppercase() }
             building != null -> building.replace("_", " ").replaceFirstChar { it.uppercase() }
             leisure != null -> leisure.replace("_", " ").replaceFirstChar { it.uppercase() }
+            natural != null -> natural.replace("_", " ").replaceFirstChar { it.uppercase() }
+            place != null -> place.replace("_", " ").replaceFirstChar { it.uppercase() }
             else -> type.displayName
         }
     }
