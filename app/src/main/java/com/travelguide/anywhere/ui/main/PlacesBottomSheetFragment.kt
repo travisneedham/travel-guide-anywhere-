@@ -12,7 +12,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.chip.ChipGroup
@@ -69,7 +71,9 @@ class PlacesBottomSheetFragment : BottomSheetDialogFragment() {
 
         // Refresh when the service commits a new place.
         viewLifecycleOwner.lifecycleScope.launch {
-            TourGuideService.mentionedPlaces.collect { populateList() }
+            viewLifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                TourGuideService.mentionedPlaces.collect { populateList() }
+            }
         }
     }
 

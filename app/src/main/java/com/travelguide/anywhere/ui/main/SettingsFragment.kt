@@ -7,17 +7,11 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
 import android.net.Uri
 import android.provider.MediaStore
-import android.view.WindowManager
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.ScrollView
-import android.widget.TextView
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -49,7 +43,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
-import com.travelguide.anywhere.experiment.TtsExperiment
 import com.travelguide.anywhere.service.KokoroTtsEngine
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -110,7 +103,6 @@ class SettingsFragment : Fragment() {
         loadPrompts()
         loadLocalLlm()
         setupDiagnostics()
-        setupExperiment()
     }
 
     private fun setupToolbar() {
@@ -706,137 +698,6 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun setupExperiment() {
-        binding.btnRunExperiment.setOnClickListener {
-            if (!kokoroModelManager.isReady) {
-                Toast.makeText(requireContext(), "Kokoro model not downloaded — download it first in the Voice section", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            if (viewModel.tourState.value != TourState.IDLE) {
-                Toast.makeText(requireContext(), "Stop the tour before running the experiment", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            startExperiment()
-        }
-    }
-
-    private fun startExperiment() {
-        val ctx = requireContext()
-        val window = requireActivity().window
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        val pm = ctx.getSystemService(PowerManager::class.java)
-        val wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK, "TravelGuide:ExperimentWakeLock"
-        ).also { it.acquire(90 * 60 * 1000L) }
-
-        val progressBar = ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 0
-        }
-        val tvStatus = TextView(ctx).apply {
-            text = "Initializing Kokoro TTS engine…"
-            setPadding(0, 16, 0, 0)
-        }
-        val layout = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(64, 40, 64, 16)
-            addView(progressBar)
-            addView(tvStatus)
-        }
-
-        var experimentJob: kotlinx.coroutines.Job? = null
-        val dialog = MaterialAlertDialogBuilder(ctx)
-            .setTitle("Running TTS Experiment")
-            .setMessage("This will take ~35 minutes. Keep the phone plugged in.")
-            .setView(layout)
-            .setCancelable(false)
-            .setNegativeButton("Cancel") { _, _ ->
-                experimentJob?.cancel()
-                wakeLock.runCatching { if (isHeld) release() }
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-            .show()
-
-        val voiceSid = prefs.getInt(MainFragment.PREF_KOKORO_VOICE_SID, MainFragment.DEFAULT_KOKORO_VOICE_SID)
-        val modelDir = kokoroModelManager.modelDir
-
-        val experiment = TtsExperiment(ctx, modelDir, voiceSid) { percent, status ->
-            lifecycleScope.launch(Dispatchers.Main) {
-                if (dialog.isShowing) {
-                    progressBar.progress = percent
-                    tvStatus.text = status
-                }
-            }
-        }
-
-        experimentJob = lifecycleScope.launch {
-            val results = try {
-                experiment.run()
-            } catch (e: Exception) {
-                if (!isActive) {
-                    wakeLock.runCatching { if (isHeld) release() }
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    return@launch
-                }
-                wakeLock.runCatching { if (isHeld) release() }
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                if (dialog.isShowing) dialog.dismiss()
-                MaterialAlertDialogBuilder(ctx)
-                    .setTitle("Experiment Failed")
-                    .setMessage(e.message ?: "Unknown error")
-                    .setPositiveButton("OK", null)
-                    .show()
-                return@launch
-            }
-
-            wakeLock.runCatching { if (isHeld) release() }
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-            val report = experiment.formatResults(results)
-            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            data class SaveResult(val displayPath: String, val uri: Uri)
-            val saved = withContext(Dispatchers.IO) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val resolver = ctx.contentResolver
-                    val cv = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, "tts_experiment_$ts.txt")
-                        put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
-                    resolver.openOutputStream(uri)!!.use { it.write(report.toByteArray()) }
-                    cv.clear()
-                    cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    resolver.update(uri, cv, null, null)
-                    SaveResult("Downloads/tts_experiment_$ts.txt", uri)
-                } else {
-                    val outDir = ctx.getExternalFilesDir("Experiment") ?: ctx.filesDir
-                    outDir.mkdirs()
-                    val f = File(outDir, "tts_experiment_$ts.txt").also { it.writeText(report) }
-                    SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
-                }
-            }
-
-            if (dialog.isShowing) dialog.dismiss()
-
-            MaterialAlertDialogBuilder(ctx)
-                .setTitle("Experiment Complete!")
-                .setMessage("Results saved to:\n${saved.displayPath}\n\nOpen the Files app → Downloads to find it.")
-                .setPositiveButton("Share File") { _, _ ->
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_STREAM, saved.uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "TTS Buffer Experiment $ts")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(Intent.createChooser(shareIntent, "Share Experiment Results"))
-                }
-                .setNegativeButton("Done", null)
-                .show()
-        }
-    }
-
     private fun setupDiagnostics() {
         val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
         binding.sliderHistoryExpiry.value = expiryDays.toFloat().coerceIn(5f, 90f)
@@ -1158,6 +1019,7 @@ class SettingsFragment : Fragment() {
         previewPlayer?.runCatching { stop() }
         previewPlayer?.release()
         previewPlayer = null
+        previewTts = null
         piperStateJob?.cancel()
         piperPreviewTts = null
         piperPreviewTtsVoiceId = null

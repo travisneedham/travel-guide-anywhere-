@@ -59,6 +59,7 @@ class NarrationRepository @Inject constructor(
         val locationStr = "%.4f°N, %.4f°W".format(location.latitude, Math.abs(location.longitude))
 
         val wikiExtract = poi.tags["wikipedia"]?.let { fetchWikipediaIntro(it) }
+            ?: poi.tags["wikidata"]?.let { fetchWikipediaIntroFromWikidata(it) }
         if (wikiExtract != null) {
             Log.d(TAG, "Wikipedia context for '${poi.name}': ${wikiExtract.length} chars")
         }
@@ -156,13 +157,7 @@ class NarrationRepository @Inject constructor(
         repeat(3) { attempt ->
             try {
                 val response = claudeApi.createMessage(apiKey = anthropicKey, request = request)
-                response.usage?.let { usage ->
-                    val cost = computeCostUsd(anthropicModel, usage.inputTokens, usage.outputTokens)
-                    prefs.edit().putFloat(
-                        PREF_ANTHROPIC_SPEND_USD,
-                        prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
-                    ).apply()
-                }
+                response.usage?.let { addSpend(anthropicModel, it.inputTokens, it.outputTokens) }
                 val text = response.text
                 if (text.isNotBlank()) {
                     val (summary, narrationText) = parseSummaryAndNarration(text)
@@ -217,13 +212,7 @@ class NarrationRepository @Inject constructor(
         )
         return try {
             val response = claudeApi.createMessage(apiKey = apiKey, request = request)
-            response.usage?.let { usage ->
-                val cost = computeCostUsd("claude-haiku-4-5-20251001", usage.inputTokens, usage.outputTokens)
-                prefs.edit().putFloat(
-                    PREF_ANTHROPIC_SPEND_USD,
-                    prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
-                ).apply()
-            }
+            response.usage?.let { addSpend("claude-haiku-4-5-20251001", it.inputTokens, it.outputTokens) }
             response.text.trim().startsWith("YES", ignoreCase = true)
         } catch (e: Exception) {
             Log.w(TAG, "Similarity check failed for '$poiName': ${e.message}")
@@ -421,13 +410,7 @@ class NarrationRepository @Inject constructor(
         repeat(3) { attempt ->
             try {
                 val response = claudeApi.createMessage(apiKey = anthropicKey, request = request)
-                response.usage?.let { usage ->
-                    val cost = computeCostUsd(anthropicModel, usage.inputTokens, usage.outputTokens)
-                    prefs.edit().putFloat(
-                        PREF_ANTHROPIC_SPEND_USD,
-                        prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
-                    ).apply()
-                }
+                response.usage?.let { addSpend(anthropicModel, it.inputTokens, it.outputTokens) }
                 val text = response.text
                 if (text.isNotBlank()) {
                     val (title, summary, narrationText) = parseDeepDiveResponse(text)
@@ -447,6 +430,14 @@ class NarrationRepository @Inject constructor(
             delay(3_000L * (attempt + 1))
         }
         return NarrationResult(text = "Unable to continue deep dive.", commitHistory = {})
+    }
+
+    private fun addSpend(model: String, inputTokens: Int, outputTokens: Int) {
+        val cost = computeCostUsd(model, inputTokens, outputTokens)
+        prefs.edit().putFloat(
+            PREF_ANTHROPIC_SPEND_USD,
+            prefs.getFloat(PREF_ANTHROPIC_SPEND_USD, 0f) + cost
+        ).apply()
     }
 
     private fun computeCostUsd(model: String, inputTokens: Int, outputTokens: Int): Float {
@@ -526,15 +517,43 @@ class NarrationRepository @Inject constructor(
         }
     }
 
+    private suspend fun fetchWikipediaIntroFromWikidata(qid: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://www.wikidata.org/w/api.php" +
+                "?action=wbgetentities&ids=$qid&props=sitelinks&sitefilter=enwiki&format=json"
+            val httpRequest = Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+                .build()
+            val body = okHttpClient.newCall(httpRequest).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                response.body?.string() ?: return@withContext null
+            }
+            val title = com.google.gson.JsonParser.parseString(body).asJsonObject
+                ?.getAsJsonObject("entities")
+                ?.getAsJsonObject(qid)
+                ?.getAsJsonObject("sitelinks")
+                ?.getAsJsonObject("enwiki")
+                ?.get("title")?.asString
+                ?: return@withContext null
+            fetchWikipediaIntro("en:$title")
+        } catch (e: Exception) {
+            Log.w(TAG, "Wikidata→Wikipedia intro failed for $qid: ${e.message}")
+            null
+        }
+    }
+
     private fun maxTokensFor(poi: PlaceOfInterest, hasWikiContext: Boolean): Int {
         val score = poi.fameScore
+        val otmRate = poi.tags["otm_rate"]?.toIntOrNull() ?: -1
         return when {
-            hasWikiContext && score >= 2000 -> 4000
-            hasWikiContext && score >= 500  -> 2500
-            hasWikiContext                  -> 1500
-            score >= 1000                   -> 2000
-            score >= 200                    -> 1200
-            else                            -> 800
+            hasWikiContext && (score >= 2000 || otmRate >= 7) -> 4000
+            hasWikiContext && (score >= 500  || otmRate >= 5) -> 2500
+            hasWikiContext                                     -> 1500
+            score >= 1000 || otmRate >= 7                     -> 2000
+            score >= 200  || otmRate >= 5                     -> 1200
+            else                                              -> 800
         }
     }
 

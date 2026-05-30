@@ -84,24 +84,30 @@ class OpenAiTtsEngine(
                 }
                 currentFile = file
                 withContext(Dispatchers.Main) {
-                    mediaPlayer = MediaPlayer().apply {
-                        setDataSource(file.absolutePath)
-                        setOnCompletionListener {
+                    val mp = MediaPlayer()
+                    try {
+                        mp.setDataSource(file.absolutePath)
+                        mp.setOnCompletionListener {
                             isPaused = false
                             file.delete()
                             currentFile = null
                             onDone()
                         }
-                        setOnErrorListener { _, _, _ ->
+                        mp.setOnErrorListener { _, _, _ ->
                             isPaused = false
                             file.delete()
                             currentFile = null
                             onError()
                             true
                         }
-                        prepare()
+                        mp.prepare()
+                        mediaPlayer = mp
                         onStart()
-                        start()
+                        mp.start()
+                    } catch (e: Exception) {
+                        if (mediaPlayer === mp) mediaPlayer = null
+                        mp.release()
+                        throw e
                     }
                 }
             } catch (e: Exception) {

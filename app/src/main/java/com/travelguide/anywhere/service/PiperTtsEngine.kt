@@ -121,29 +121,35 @@ class PiperTtsEngine(
                         ?: throw Exception("audio generation failed")
                 }
                 withContext(Dispatchers.Main) {
-                    mediaPlayer = MediaPlayer().apply {
-                        setDataSource(file.absolutePath)
-                        setOnCompletionListener {
+                    val mp = MediaPlayer()
+                    try {
+                        mp.setDataSource(file.absolutePath)
+                        mp.setOnCompletionListener {
                             isPaused = false
                             file.delete()
                             mediaPlayer = null
                             onDone()
                         }
-                        setOnErrorListener { _, _, _ ->
+                        mp.setOnErrorListener { _, _, _ ->
                             isPaused = false
                             file.delete()
                             mediaPlayer = null
                             onError()
                             true
                         }
-                        prepare()
+                        mp.prepare()
                         try {
-                            playbackParams = android.media.PlaybackParams()
+                            mp.playbackParams = android.media.PlaybackParams()
                                 .setSpeed(currentPlayRate.coerceAtLeast(0.1f))
                         } catch (_: Exception) { /* falls back to 1.0× */ }
+                        mediaPlayer = mp
                         onStart()
                         onEnqueued()
-                        start()
+                        mp.start()
+                    } catch (e: Exception) {
+                        if (mediaPlayer === mp) mediaPlayer = null
+                        mp.release()
+                        throw e
                     }
                 }
             } catch (e: Exception) {

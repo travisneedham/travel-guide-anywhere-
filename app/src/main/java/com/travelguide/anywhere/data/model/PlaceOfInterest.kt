@@ -12,6 +12,8 @@ data class PlaceOfInterest(
     val distanceMiles: Float get() = distanceMeters / 1609.34f
 
     // Higher score = more notable. wikipedia/wikidata and heritage tags are the strongest signals.
+    // This score is Overpass-oriented — OSM tags only. OTM POIs carry otm_rate instead; do not
+    // use fameScore to rank OTM results.
     val fameScore: Int get() {
         var score = type.interestScore
         // Cross-wiki presence
