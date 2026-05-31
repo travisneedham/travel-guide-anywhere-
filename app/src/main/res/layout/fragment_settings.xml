@@ -1364,8 +1364,26 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:layout_marginBottom="12dp"
                     android:text="Run POI API Experiment" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_experiment"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:trackCornerRadius="2dp" />
+
+                <TextView
+                    android:id="@+id/tv_experiment_step"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:visibility="gone" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_copy_logs"

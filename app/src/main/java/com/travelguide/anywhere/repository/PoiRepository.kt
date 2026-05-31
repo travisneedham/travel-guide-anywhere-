@@ -129,7 +129,7 @@ class PoiRepository @Inject constructor(
             radius = radiusMeters,
             lon = location.longitude,
             lat = location.latitude,
-            kinds = "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens",
+            kinds = "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens_and_parks",
             rate = "1",
             orderby = if (famousMode) "rate" else "dist",
             limit = 100,

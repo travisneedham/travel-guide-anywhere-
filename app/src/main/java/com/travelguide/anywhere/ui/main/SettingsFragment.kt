@@ -727,11 +727,6 @@ class SettingsFragment : Fragment() {
                 .show()
         }
         binding.btnPoiExperiment.setOnClickListener {
-            Toast.makeText(
-                requireContext(),
-                "Running POI experiment — this can take a few minutes. Then use Export Full Log File.",
-                Toast.LENGTH_LONG
-            ).show()
             launchPoiExperiment()
         }
         binding.btnCopyLogs.setOnClickListener {
@@ -847,20 +842,30 @@ class SettingsFragment : Fragment() {
 
     @SuppressLint("MissingPermission")
     private fun launchPoiExperiment() {
-        // Default to Denton, TX (matches earlier diagnostic logs) when no fix is available.
         val defaultLat = 33.1789543
         val defaultLon = -97.1118095
         val runWith = { lat: Double, lon: Double ->
+            binding.btnPoiExperiment.isEnabled = false
+            binding.progressExperiment.visibility = View.VISIBLE
+            binding.tvExperimentStep.visibility = View.VISIBLE
+            binding.tvExperimentStep.text = "Starting…"
             viewLifecycleOwner.lifecycleScope.launch {
                 try {
-                    poiExperiment.run(lat, lon)
+                    poiExperiment.run(lat, lon) { step ->
+                        binding.tvExperimentStep.text = step
+                    }
+                    binding.tvExperimentStep.text = "Done — export the log file."
                     Toast.makeText(
                         requireContext(),
                         "POI experiment complete — Export Full Log File and send it back.",
                         Toast.LENGTH_LONG
                     ).show()
                 } catch (e: Exception) {
+                    binding.tvExperimentStep.text = "Error: ${e.message}"
                     Toast.makeText(requireContext(), "Experiment error: ${e.message}", Toast.LENGTH_LONG).show()
+                } finally {
+                    binding.btnPoiExperiment.isEnabled = true
+                    binding.progressExperiment.visibility = View.GONE
                 }
             }
             Unit
