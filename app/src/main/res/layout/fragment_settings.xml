@@ -155,31 +155,6 @@
                 android:paddingBottom="16dp"
                 android:visibility="gone">
 
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="OpenTripMap API Key (optional)"
-                    android:layout_marginBottom="4dp"
-                    app:boxStrokeColor="@color/accent"
-                    app:hintTextColor="@color/text_secondary">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/et_opentripmap_key"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text"
-                        android:textColor="@color/text_primary"
-                        android:textSize="13sp" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Free key from opentripmap.io — improves famous-place ranking. Without it, Overpass is used as fallback."
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:layout_marginBottom="16dp" />
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -1354,7 +1329,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Runs raw OTM/Overpass/Wiki probes against your current location and writes results to the log. When done, use Export Full Log File and send it back."
+                    android:text="Runs raw Overpass/Wiki probes against your current location and writes results to the log. When done, use Export Full Log File and send it back."
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
 
@@ -1384,6 +1359,23 @@
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary"
                     android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_clear_poi_cache"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Clear Cached Places" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Wipes saved place lists and Wikipedia data so the next tour fetches fresh."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_copy_logs"

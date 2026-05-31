@@ -327,6 +327,10 @@ POI artwork back to the car's head unit.
 
 ## POI Discovery: Overpass Element-Ordering Problem and OpenTripMap Migration
 
+> ⚠️ **Partially superseded** — OpenTripMap was removed in v3.4.4 (see "v3.4.4 — OpenTripMap removed").
+> The Overpass element-ordering analysis below is still relevant; the OpenTripMap-migration parts are
+> historical only.
+
 ### The Overpass element-ordering problem (v3.2.9–v3.3.3)
 
 Overpass returns results in **element-type order**: all matching nodes first (sorted by OSM ID),
@@ -408,6 +412,9 @@ Anthropic API key in app settings.
 ---
 
 ## OpenTripMap Integration: Bugs Found and Fixed (v3.3.7)
+
+> ⚠️ **Superseded** — OpenTripMap was removed entirely in v3.4.4 (see "v3.4.4 — OpenTripMap removed").
+> Kept for history.
 
 ### Bug 1: Results sorted by distance instead of fame
 
@@ -608,11 +615,44 @@ Per OSM convention these are polygons, invisible to the node-only catch-all. Cov
 | Overpass `[timeout:N]` per shard | `120` |
 | OkHttp Overpass client `callTimeout`/`readTimeout` | `125s` (derived client in `PoiRepository`) |
 | Global OkHttp `connect`/`write`/`read`/`call` | `15` / `30` / `125` / `125` s |
-| OTM Retrofit client `callTimeout`/`readTimeout` | `30s` (derived in `AppModule`) |
 
 The `PoiExperiment` harness itself still uses `[timeout:300]` — it's a diagnostic tool, left as-is.
 
+### v3.4.4 — OpenTripMap removed entirely; Overpass is the sole POI source
+
+OTM was originally adopted (v3.3.x) for its `rate` field, a crowd-sourced 0–7 notability signal.
+The v3.4.x experiments proved it was the **wrong source for famous mode**: OTM's rate-ranked
+top-100 within a 40-mile radius is dominated by the geographically-central cluster, so a famous-mode
+tour started from Denton TX returned only Denton/UNT venues — JFK Museum, Reunion Tower, and Dealey
+Plaza (~35 mi away in Dallas) never made the cutoff. The Overpass wikipedia-gated shards already
+query the *full* radius correctly and surface globally-notable POIs regardless of clustering.
+
+Beyond that bug, `otm_rate` was a strictly weaker signal than the Wikipedia-pageviews and
+Wikidata-sitelinks values we already compute, and OTM cost us a user-facing API-key setting plus a
+whole code/UI/diagnostic path to maintain. When no key was set, the app already fell through to
+Overpass for 100% of cases. So OTM was removed:
+
+- Deleted `OpenTripMapService.kt`, `OpenTripMapPlace.kt`, the Hilt provider, the `fetchFromOpenTripMap`/
+  `resolveTypeFromKinds` code, the `otm_rate` fold in `fameScore`, the `otmRate` branches in
+  `NarrationRepository.maxTokensFor`, the OTM probes in `PoiExperiment`, and the Settings API-key field.
+- `fetchPoisInternal` now calls `fetchFromOverpass` unconditionally for both modes
+  (`buildFamousQueryShards` for famous, `buildNearbyQuery` for nearby).
+- This permanently closes the "OTM-as-wrong-source" class of bugs. The sections below
+  ("OpenTripMap Integration…" and the OTM-specific parts of the v3.3.x notes) are **superseded** and
+  kept only for history.
+
+**Cache invalidation:** there is intentionally **no** automatic/version-based cache wipe — that would
+erase users' caches on every app update. The POI cache persists across versions; its 6h TTL plus the
+now-correct Overpass results clear the old v3.4.3 OTM entry naturally. A manual **"Clear Cached
+Places"** button (Settings → NERD STUFF, calls `PoiRepository.clearPoiCaches()`) wipes the POI list
+and Wikipedia/Wikidata enrichment caches on demand for testing/troubleshooting.
+
 ---
+
+## OpenTripMap Integration & Migration (SUPERSEDED — removed in v3.4.4)
+
+> ⚠️ **Superseded** — OpenTripMap was removed entirely in v3.4.4 (see "v3.4.4 — OpenTripMap removed"
+> above). Everything from here to the next `##` heading is retained for historical context only.
 
 ## Overpass Fallback: Frozen at v3.3.2 Logic
 

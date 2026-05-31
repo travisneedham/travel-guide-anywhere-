@@ -4,7 +4,6 @@ import android.content.Context
 import com.google.gson.Gson
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.data.remote.NominatimService
-import com.travelguide.anywhere.data.remote.OpenTripMapService
 import com.travelguide.anywhere.data.remote.OsrmService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -89,18 +88,6 @@ object AppModule {
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(NominatimService::class.java)
-
-    @Provides
-    @Singleton
-    fun provideOpenTripMapService(client: OkHttpClient, gson: Gson): OpenTripMapService =
-        Retrofit.Builder()
-            .baseUrl(OpenTripMapService.BASE_URL)
-            // OTM (primary source) normally responds in ~300ms; cap it at 30s so a stalled OTM
-            // call can't block the whole fetch behind the client's 125s Overpass ceiling.
-            .client(client.newBuilder().callTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build())
-            .addConverterFactory(GsonConverterFactory.create(gson))
-            .build()
-            .create(OpenTripMapService::class.java)
 
     @Provides
     @Singleton

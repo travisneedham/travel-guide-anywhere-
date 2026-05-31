@@ -546,14 +546,13 @@ class NarrationRepository @Inject constructor(
 
     private fun maxTokensFor(poi: PlaceOfInterest, hasWikiContext: Boolean): Int {
         val score = poi.fameScore
-        val otmRate = poi.tags["otm_rate"]?.toIntOrNull() ?: -1
         return when {
-            hasWikiContext && (score >= 2000 || otmRate >= 7) -> 4000
-            hasWikiContext && (score >= 500  || otmRate >= 5) -> 2500
-            hasWikiContext                                     -> 1500
-            score >= 1000 || otmRate >= 7                     -> 2000
-            score >= 200  || otmRate >= 5                     -> 1200
-            else                                              -> 800
+            hasWikiContext && score >= 2000 -> 4000
+            hasWikiContext && score >= 500  -> 2500
+            hasWikiContext                  -> 1500
+            score >= 1000                   -> 2000
+            score >= 200                    -> 1200
+            else                            -> 800
         }
     }
 

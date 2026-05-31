@@ -1,14 +1,11 @@
 package com.travelguide.anywhere.repository
 
-import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.google.gson.Gson
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -27,11 +24,8 @@ import javax.inject.Singleton
  *
  *   1. Wikidata sitelinks response shape
  *   2. Wikipedia Pageviews response shape
- *   3. OTM /places/kinds catalog (404 probe)
- *   4. OTM single-kind validity probe
- *   5. OTM combined-kinds-string probe (including the v3.4.2 fixed string)
- *   6. Overpass per-branch timing (each branch isolated)
- *   7. Full production famous query
+ *   3. Overpass per-branch timing (each branch isolated)
+ *   4. Full production famous query
  *
  * Read the results afterwards with Settings → Export Full Log File.
  */
@@ -39,7 +33,6 @@ import javax.inject.Singleton
 class PoiExperiment @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gson: Gson,
-    private val prefs: SharedPreferences,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -56,8 +49,6 @@ class PoiExperiment @Inject constructor(
 
         log("══════════════ POI EXPERIMENT START ══════════════")
         log("when=${Date()}  location=($lat, $lon)  radius=${radiusMeters}m (~${radiusMeters / 1609} mi)")
-        val otmKey = prefs.getString(PoiRepository.PREF_OPENTRIPMAP_KEY, "") ?: ""
-        log("otmKeyPresent=${otmKey.isNotBlank()}")
 
         // ── 1 & 2: Wiki enrichment FIRST while the network is fresh ──────────
         progress("Wiki: Wikidata sitelinks…")
@@ -66,22 +57,7 @@ class PoiExperiment @Inject constructor(
         progress("Wiki: Wikipedia Pageviews…")
         testPageviews()
 
-        // ── 3–5: OpenTripMap probes ───────────────────────────────────────────
-        if (otmKey.isNotBlank()) {
-            progress("OTM: kinds catalog…")
-            dumpOtmKindsCatalog(otmKey)
-
-            testOtmKindsIndividually(lat, lon, radiusMeters, otmKey) { idx, total, kind ->
-                mainHandler.post { onProgress("OTM: kind $idx/$total ($kind)…") }
-            }
-
-            progress("OTM: combined strings…")
-            testOtmCombinedStrings(lat, lon, radiusMeters, otmKey)
-        } else {
-            log("[OTM] skipped — no OpenTripMap API key set in Settings")
-        }
-
-        // ── 6 & 7: Overpass branch timing ────────────────────────────────────
+        // ── 3 & 4: Overpass branch timing ────────────────────────────────────
         testOverpassBranches(lat, lon, radiusMeters) { idx, total, name ->
             mainHandler.post { onProgress("Overpass: branch $idx/$total ($name)…") }
         }
@@ -119,61 +95,6 @@ class PoiExperiment @Inject constructor(
         cal.add(Calendar.MONTH, -2)
         val sy = cal.get(Calendar.YEAR); val sm = cal.get(Calendar.MONTH) + 1
         return "%04d%02d0100".format(sy, sm) to "%04d%02d0100".format(ey, em)
-    }
-
-    // ── OpenTripMap ──────────────────────────────────────────────────────────
-
-    private fun dumpOtmKindsCatalog(otmKey: String) {
-        log("──── OTM /places/kinds (authoritative taxonomy) ────")
-        val url = "https://api.opentripmap.com/0.1/en/places/kinds?format=json&apikey=$otmKey"
-        val (code, ms, body) = httpGet(url)
-        log("GET /places/kinds -> HTTP $code in ${ms}ms")
-        logLong("kinds", body, max = 12000)
-    }
-
-    private suspend fun testOtmKindsIndividually(
-        lat: Double, lon: Double, radius: Int, otmKey: String,
-        onKind: (idx: Int, total: Int, kind: String) -> Unit,
-    ) {
-        log("──── OTM single-kind validity probe (one request per candidate) ────")
-        val total = CANDIDATE_KINDS.size
-        for ((idx, kind) in CANDIDATE_KINDS.withIndex()) {
-            onKind(idx + 1, total, kind)
-            val url = "https://api.opentripmap.com/0.1/en/places/radius?radius=$radius&lon=$lon&lat=$lat" +
-                "&kinds=$kind&rate=1&format=json&limit=5&apikey=$otmKey"
-            var (code, ms, body) = httpGet(url)
-            if (code == 429) {
-                delay(7000)
-                val retry = httpGet(url); code = retry.first; ms = retry.second; body = retry.third
-            }
-            val verdict = when (code) {
-                200 -> "VALID   (count≈${jsonArraySize(body)})"
-                400 -> "INVALID (HTTP 400)"
-                429 -> "RATE_LIMITED"
-                else -> "HTTP $code"
-            }
-            log("  kind=%-30s %s  (${ms}ms)".format(kind, verdict))
-            if (code != 200 && code != 429) logLong("    body", body, max = 240)
-            delay(500)
-        }
-    }
-
-    private suspend fun testOtmCombinedStrings(lat: Double, lon: Double, radius: Int, otmKey: String) {
-        log("──── OTM combined-kinds-string probe ────")
-        val strings = listOf(
-            "v3.3.8_known_good" to "interesting_places,museums,historic,architecture",
-            "v3.3.9_broken"     to "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens",
-            "v3.4.2_fixed"      to "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens_and_parks",
-        )
-        for ((label, kinds) in strings) {
-            val url = "https://api.opentripmap.com/0.1/en/places/radius?radius=$radius&lon=$lon&lat=$lat" +
-                "&kinds=$kinds&rate=1&orderby=rate&format=json&limit=20&apikey=$otmKey"
-            val (code, ms, body) = httpGet(url)
-            log("  $label -> HTTP $code (${ms}ms)  count≈${jsonArraySize(body)}")
-            log("    kinds=$kinds")
-            if (code != 200) logLong("    body", body, max = 300)
-            delay(700)
-        }
     }
 
     // ── Overpass ───────────────────────────────────────────────────────────
@@ -293,10 +214,6 @@ class PoiExperiment @Inject constructor(
         }
     }
 
-    private fun jsonArraySize(body: String): String = try {
-        gson.fromJson(body, JsonArray::class.java)?.size()?.toString() ?: "?"
-    } catch (e: Exception) { "?" }
-
     private fun overpassElementCount(body: String): String = try {
         gson.fromJson(body, JsonObject::class.java)?.getAsJsonArray("elements")?.size()?.toString() ?: "?"
     } catch (e: Exception) { "?" }
@@ -314,15 +231,5 @@ class PoiExperiment @Inject constructor(
 
     companion object {
         private const val TAG = "PoiExperiment"
-
-        private val CANDIDATE_KINDS = listOf(
-            "interesting_places", "museums", "historic", "architecture", "cultural", "religion",
-            "natural", "beaches", "water", "geological_formations", "nature_reserves",
-            "amusements", "theme_parks", "water_parks", "zoos", "aquariums",
-            "sport", "stadiums", "swimming_pools",
-            "gardens", "gardens_and_parks", "urban_environment",
-            "view_points", "monuments_and_memorials", "fortifications", "castles",
-            "other_buildings_and_structures", "towers", "bridges", "skyscrapers",
-        )
     }
 }

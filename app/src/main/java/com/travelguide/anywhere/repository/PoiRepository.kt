@@ -8,8 +8,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.PoiType
-import com.travelguide.anywhere.data.remote.OpenTripMapService
-import com.travelguide.anywhere.data.remote.dto.OpenTripMapPlace
 import com.travelguide.anywhere.data.remote.dto.OverpassElement
 import com.travelguide.anywhere.data.remote.dto.OverpassResponse
 import com.google.gson.reflect.TypeToken
@@ -35,11 +33,9 @@ class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gson: Gson,
     private val prefs: SharedPreferences,
-    private val openTripMapService: OpenTripMapService,
 ) {
     companion object {
         private const val TAG = "PoiRepository"
-        const val PREF_OPENTRIPMAP_KEY = "pref_opentripmap_key"
 
         const val PREF_FILTER_HISTORIC         = "filter_historic"
         const val PREF_FILTER_MUSEUM           = "filter_museum"
@@ -53,8 +49,6 @@ class PoiRepository @Inject constructor(
             "city", "town", "village", "hamlet", "suburb", "neighbourhood",
             "county", "state", "country", "region", "district", "municipality", "borough"
         )
-
-        private const val OTM_FALLBACK_THRESHOLD = 3
 
         private const val WIKI_CACHE_TTL_MS = 4L * 24 * 60 * 60 * 1000  // 4 days
         private const val PREF_WIKI_VIEWS_PREFIX = "wiki_v_"
@@ -93,7 +87,7 @@ class PoiRepository @Inject constructor(
     /** De-dupes a prewarm fetch and the later "Start Tour" fetch into a single network round-trip. */
     private val inFlight = ConcurrentHashMap<String, Deferred<List<PlaceOfInterest>>>()
 
-    /** Overpass needs a long ceiling; OTM/Wiki calls use the shared client. Shares the connection pool. */
+    /** Overpass needs a long ceiling; Wiki enrichment calls use the shared client. Shares the connection pool. */
     private val overpassClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
             .callTimeout(OVERPASS_CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
@@ -155,29 +149,13 @@ class PoiRepository @Inject constructor(
         cacheKey: String,
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
-        val otmKey = prefs.getString(PREF_OPENTRIPMAP_KEY, "") ?: ""
 
-        // 1. Pick a source: OpenTripMap is primary, Overpass is the fallback.
-        var source = "overpass"
-        val rawPois: List<PlaceOfInterest> = run {
-            if (otmKey.isNotBlank()) {
-                try {
-                    val otmPois = fetchFromOpenTripMap(location, radiusMeters, famousMode, otmKey)
-                    if (otmPois.size >= OTM_FALLBACK_THRESHOLD) {
-                        source = "otm"
-                        Log.d(TAG, "[OTM] Using ${otmPois.size} POIs (famousMode=$famousMode)")
-                        return@run otmPois
-                    }
-                    Log.d(TAG, "[OTM] Only ${otmPois.size} results — falling back to Overpass")
-                } catch (e: Exception) {
-                    Log.w(TAG, "[OTM] Failed: ${e.message} — falling back to Overpass")
-                }
-            }
-            fetchFromOverpass(location, radiusMeters, famousMode)
-        }
+        // 1. Overpass is the sole POI source for both modes (OTM removed in v3.4.4 — its rate-ranked
+        //    results were geographically clustered and missed famous landmarks at the edge of the radius).
+        val source = "overpass"
+        val rawPois: List<PlaceOfInterest> = fetchFromOverpass(location, radiusMeters, famousMode)
 
-        // 2. Enrich with Wikipedia pageviews + Wikidata sitelinks. Runs for BOTH sources so the
-        //    fame-ranking algorithm applies whether the POIs came from OTM or Overpass.
+        // 2. Enrich with Wikipedia pageviews + Wikidata sitelinks so the fame-ranking algorithm applies.
         val enriched = try {
             enrichWithWikiData(rawPois)
         } catch (e: Exception) {
@@ -193,7 +171,7 @@ class PoiRepository @Inject constructor(
             Log.d(TAG, "[$source/$label] ${sorted.size} POIs ranked. Top 10:")
             sorted.take(10).forEachIndexed { i, p ->
                 Log.d(TAG, "  #${i + 1} ${p.name} — fame=${p.fameScore} " +
-                    "rate=${p.tags["otm_rate"] ?: "-"} views=${p.tags["wiki_views"] ?: "-"} " +
+                    "views=${p.tags["wiki_views"] ?: "-"} " +
                     "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} type=${p.type} " +
                     "dist=${"%.1f".format(p.distanceMiles)}mi")
             }
@@ -202,96 +180,7 @@ class PoiRepository @Inject constructor(
         sorted
     }
 
-    // ── OpenTripMap ──────────────────────────────────────────────────────────
-
-    private suspend fun fetchFromOpenTripMap(
-        location: Location,
-        radiusMeters: Int,
-        famousMode: Boolean,
-        apiKey: String,
-    ): List<PlaceOfInterest> {
-        // Famous mode: ask OTM to sort by rate so the TOP-rated places in the radius are
-        // returned first (not the nearest ones). Without orderby=rate, OTM defaults to
-        // distance order — at 40mi, that means local suburban POIs dominate the 100-result
-        // window and globally famous places (e.g. JFK Museum in Dallas) are never reached.
-        //
-        // Rate filter set to "1" (lowest) for both modes so we don't accidentally exclude
-        // famous places that OTM happens to rate low. Sorting handles priority instead.
-        val places = openTripMapService.getPlacesInRadius(
-            radius = radiusMeters,
-            lon = location.longitude,
-            lat = location.latitude,
-            kinds = "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens_and_parks",
-            rate = "1",
-            orderby = if (famousMode) "rate" else "dist",
-            limit = 100,
-            apiKey = apiKey,
-        )
-
-        Log.d(TAG, "[OTM] Raw response: ${places.size} places (famousMode=$famousMode, orderby=${if (famousMode) "rate" else "dist"})")
-
-        val pois = places
-            .filter { it.name.isNotBlank() }
-            .map { it.toPlaceOfInterest(location) }
-            .filter { isTypeEnabled(it.type) }
-            .distinctBy { it.name }
-            .let { list ->
-                if (famousMode) list.sortedByDescending { it.tags["otm_rate"]?.toIntOrNull() ?: 0 }
-                else list.sortedBy { it.distanceMeters }
-            }
-
-        if (pois.isNotEmpty()) {
-            Log.d(TAG, "[OTM] Top POIs: " +
-                pois.take(5).joinToString { "${it.name}(otm_rate=${it.tags["otm_rate"]}, dist=${"%.1f".format(it.distanceMiles)}mi)" })
-        }
-        return pois
-    }
-
-    private fun OpenTripMapPlace.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
-        val results = FloatArray(1)
-        Location.distanceBetween(
-            userLocation.latitude, userLocation.longitude,
-            point.lat, point.lon,
-            results
-        )
-        val tags = buildMap {
-            wikidata?.let { put("wikidata", it) }
-            osm?.let { put("osm", it) }
-            kinds?.let { put("kinds", it) }
-            put("otm_rate", rate.toString())
-        }
-        return PlaceOfInterest(
-            osmId = osm ?: "otm/$xid",
-            name = name,
-            lat = point.lat,
-            lon = point.lon,
-            type = resolveTypeFromKinds(kinds),
-            tags = tags,
-            distanceMeters = results[0],
-        )
-    }
-
-    private fun resolveTypeFromKinds(kinds: String?): PoiType {
-        if (kinds == null) return PoiType.OTHER
-        val k = kinds.lowercase()
-        return when {
-            "museum" in k -> PoiType.MUSEUM
-            "archaeological" in k || "fortification" in k || "castle" in k -> PoiType.HISTORIC
-            "historic" in k || "monument" in k || "memorial" in k -> PoiType.HISTORIC
-            "religion" in k -> PoiType.PLACE_OF_WORSHIP
-            "view_point" in k -> PoiType.VIEWPOINT
-            "stadium" in k || "sport" in k -> PoiType.ATTRACTION
-            "amusement" in k -> PoiType.ATTRACTION
-            "beach" in k -> PoiType.PARK
-            "marketplace" in k || "market" in k -> PoiType.ATTRACTION
-            "garden" in k || "park" in k || "natural" in k -> PoiType.PARK
-            "artwork" in k || "art_gallery" in k -> PoiType.ARTWORK
-            "cultural" in k || "architecture" in k || "tourist" in k -> PoiType.ATTRACTION
-            else -> PoiType.OTHER
-        }
-    }
-
-    // ── Overpass (fallback) ──────────────────────────────────────────────────
+    // ── Overpass (sole POI source) ────────────────────────────────────────────
 
     private suspend fun fetchFromOverpass(
         location: Location,
@@ -656,6 +545,27 @@ class PoiRepository @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "[cache] write failed for $key: ${e.message}")
         }
+    }
+
+    /**
+     * Manually wipe every cached POI list and Wikipedia/Wikidata enrichment entry. Exposed for the
+     * Settings "Clear Cached Places" button (testing/troubleshooting). There is intentionally NO
+     * automatic version-based wipe — the cache persists across app updates so production users don't
+     * lose it on upgrade; the 6h TTL handles staleness on its own.
+     */
+    fun clearPoiCaches() {
+        val editor = prefs.edit()
+        // Snapshot the keys first — don't mutate the map backing prefs.all while iterating it.
+        prefs.all.keys.toList()
+            .filter {
+                it.startsWith(PREF_POI_CACHE_PREFIX) ||
+                it.startsWith(PREF_WIKI_VIEWS_PREFIX) ||
+                it.startsWith(PREF_WIKI_SLINKS_PREFIX)
+            }
+            .forEach { editor.remove(it) }
+        editor.apply()
+        inFlight.clear()
+        Log.d(TAG, "[cache] cleared all POI + wiki enrichment caches")
     }
 
     /** Recompute each POI's distance from the *actual* tour location (cache holds coarse distances)

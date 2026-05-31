@@ -69,6 +69,7 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var localLlmModelManager: LocalLlmModelManager
     @Inject lateinit var poiExperiment: PoiExperiment
+    @Inject lateinit var poiRepository: PoiRepository
     @Inject lateinit var fusedLocation: FusedLocationProviderClient
 
     private val viewModel: MainViewModel by activityViewModels()
@@ -561,7 +562,6 @@ class SettingsFragment : Fragment() {
     }
 
     private fun loadInterestFilters() {
-        binding.etOpentripmapKey.setText(prefs.getString(PoiRepository.PREF_OPENTRIPMAP_KEY, ""))
         binding.cbFilterHistoric.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_HISTORIC, true)
         binding.cbFilterMuseum.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_MUSEUM, true)
         binding.cbFilterAttraction.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ATTRACTION, true)
@@ -728,6 +728,10 @@ class SettingsFragment : Fragment() {
         }
         binding.btnPoiExperiment.setOnClickListener {
             launchPoiExperiment()
+        }
+        binding.btnClearPoiCache.setOnClickListener {
+            poiRepository.clearPoiCaches()
+            Toast.makeText(requireContext(), "Cached places cleared", Toast.LENGTH_SHORT).show()
         }
         binding.btnCopyLogs.setOnClickListener {
             lifecycleScope.launch {
@@ -926,7 +930,6 @@ class SettingsFragment : Fragment() {
             .putString(NarrationRepository.PREF_SYSTEM_PROMPT, systemPrompt)
             .putString(NarrationRepository.PREF_USER_PROMPT, userPrompt)
             .putInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, expiryDays)
-            .putString(PoiRepository.PREF_OPENTRIPMAP_KEY, binding.etOpentripmapKey.text?.toString()?.trim() ?: "")
             .putBoolean(PoiRepository.PREF_FILTER_HISTORIC, binding.cbFilterHistoric.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_MUSEUM, binding.cbFilterMuseum.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_ATTRACTION, binding.cbFilterAttraction.isChecked)
