@@ -1350,6 +1350,23 @@
                 android:paddingBottom="8dp"
                 android:visibility="gone">
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Runs raw OTM/Overpass/Wiki probes against your current location and writes results to the log. When done, use Export Full Log File and send it back."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_poi_experiment"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Run POI API Experiment" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_copy_logs"
                     style="@style/Widget.Material3.Button.OutlinedButton"

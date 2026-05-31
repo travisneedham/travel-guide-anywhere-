@@ -1,5 +1,6 @@
 package com.travelguide.anywhere.ui.main
 
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -27,7 +28,9 @@ import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.databinding.FragmentSettingsBinding
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.repository.NarrationRepository
+import com.travelguide.anywhere.repository.PoiExperiment
 import com.travelguide.anywhere.repository.PoiRepository
+import com.google.android.gms.location.FusedLocationProviderClient
 import com.travelguide.anywhere.service.KokoroDownloadService
 import com.travelguide.anywhere.service.KokoroModelManager
 import com.travelguide.anywhere.service.LocalLlmModelManager
@@ -65,6 +68,8 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var mentionedPlacesStore: MentionedPlacesStore
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var localLlmModelManager: LocalLlmModelManager
+    @Inject lateinit var poiExperiment: PoiExperiment
+    @Inject lateinit var fusedLocation: FusedLocationProviderClient
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -721,6 +726,14 @@ class SettingsFragment : Fragment() {
                 .setNegativeButton("Cancel", null)
                 .show()
         }
+        binding.btnPoiExperiment.setOnClickListener {
+            Toast.makeText(
+                requireContext(),
+                "Running POI experiment — this can take a few minutes. Then use Export Full Log File.",
+                Toast.LENGTH_LONG
+            ).show()
+            launchPoiExperiment()
+        }
         binding.btnCopyLogs.setOnClickListener {
             lifecycleScope.launch {
                 val logs = readTtsLogs()
@@ -829,6 +842,35 @@ class SettingsFragment : Fragment() {
                     .setNegativeButton("Done", null)
                     .show()
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun launchPoiExperiment() {
+        // Default to Denton, TX (matches earlier diagnostic logs) when no fix is available.
+        val defaultLat = 33.1789543
+        val defaultLon = -97.1118095
+        val runWith = { lat: Double, lon: Double ->
+            viewLifecycleOwner.lifecycleScope.launch {
+                try {
+                    poiExperiment.run(lat, lon)
+                    Toast.makeText(
+                        requireContext(),
+                        "POI experiment complete — Export Full Log File and send it back.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Experiment error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+            Unit
+        }
+        try {
+            fusedLocation.lastLocation
+                .addOnSuccessListener { loc -> runWith(loc?.latitude ?: defaultLat, loc?.longitude ?: defaultLon) }
+                .addOnFailureListener { runWith(defaultLat, defaultLon) }
+        } catch (e: SecurityException) {
+            runWith(defaultLat, defaultLon)
         }
     }
 

@@ -33,9 +33,12 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            // TEST BUILD: timeouts widened to 5 minutes so the PoiExperiment harness can profile
+            // slow Overpass/OTM queries without the client aborting them. Revert before release.
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(300, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS)
+            .callTimeout(300, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 // Set a descriptive User-Agent on every request (including Coil image loads).
                 // Wikimedia's CDN blocks OkHttp's default "okhttp/x.y.z" agent.

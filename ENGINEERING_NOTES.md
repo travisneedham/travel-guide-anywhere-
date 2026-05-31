@@ -479,7 +479,95 @@ limit   = 100           ← larger pool at 40mi radius
 
 ---
 
+## Famous POI Coverage & Ranking (v3.3.9 → present)
+
+> **This section supersedes the "Frozen at v3.3.2" note below for everything from v3.3.9 onward.**
+> The project owner has explicitly chosen to evolve the famous-POI pipeline (continuous fame
+> scoring + Wikipedia signals) rather than keep it frozen. The frozen note is retained as history.
+
+### Why v3.3.2's binary scoring was abandoned
+
+The frozen `fameScore` gave a flat `+1000` for any `wikipedia` tag and `+500` for any `wikidata`
+tag. That makes the JFK Museum and the Denton County Courthouse score nearly the same — fame
+became "has a Wikipedia article: yes/no", with no notion of *how* famous. The goal of the overhaul
+is a **continuous** fame signal so globally famous places clearly outrank locally notable ones.
+
+### What v3.3.9 changed (and why)
+
+1. **Continuous fame from Wikipedia pageviews.** Each POI's monthly English-Wikipedia pageviews are
+   fetched and folded into `fameScore` as `views^0.57 × 8.06`. Calibrated so ~50k views ≈ 5000 pts
+   and ~200 views ≈ 300 pts — i.e. JFK Museum ≫ Denton Courthouse instead of a tie. The exponent
+   compresses the long tail so a mega-landmark doesn't drown everything else.
+2. **Wikidata sitelinks as a second signal.** The number of language wikis linked to a POI's
+   Wikidata item (`+35` each) is a strong, language-agnostic fame proxy that works outside the US.
+3. **Enrichment pipeline.** `enrichWithWikiData()` runs the top `ENRICH_LIMIT` (25) candidates
+   through one batched Wikidata sitelinks call + parallel pageviews calls, writing `wiki_views` and
+   `wiki_sitelinks` back onto the POI tags. 4-day SharedPreferences cache (a trip tends to stay in
+   one area) keyed by article/QID.
+4. **Tag-presence fallback.** Until a POI is enriched (or if the calls fail), `wikipedia` → `+500`,
+   `wikidata` → `+150`, preserving v3.3.x behaviour as a floor.
+5. **Broader OTM kinds + Overpass branches** to actually surface the new categories (stadiums,
+   squares, gardens, markets, beaches, peaks, cemeteries, cable cars, zoos/aquariums) and 14 new
+   `resolveType` cases so they map to sensible `PoiType`s.
+
+### The v3.4.0 regression (reverted)
+
+v3.4.0 tried to fix two field-reported bugs and over-corrected on both:
+
+- **OTM 400.** OTM echoes the *entire* kinds string in its error, so the log does **not** identify
+  which kind is invalid. v3.4.0 guessed and removed four kinds. The likely real culprit is just
+  `gardens` (the valid identifier is almost certainly `gardens_and_parks`). Critical fact:
+  **a single invalid kind 400s the whole request, which silently disables OTM entirely** and forces
+  the slow Overpass fallback on every cycle. So the kinds string must contain *only verified-valid*
+  identifiers — the cost of one bad kind is a total OTM outage, the benefit of one extra kind is
+  marginal (`interesting_places` already subsumes most notable POIs).
+- **Overpass timeout.** v3.4.0 deleted the broad `node["wikipedia"]` catch-all branch. That branch
+  *was* the timeout cause (an unconstrained key-existence scan over a 40-mi radius), but it was also
+  the only branch that caught odd-but-famous POIs: `man_made=tower` (**Reunion Tower**), active
+  `place_of_worship` + wikipedia, viewpoints, non-enumerated `historic=*`, notable buildings.
+  Deleting it is a real coverage loss.
+
+Both changes were reverted to the v3.3.9 state.
+
+### Architectural fix in this build
+
+- **Enrichment now runs for BOTH sources.** Previously the OTM path `return`ed before enrichment, so
+  the entire pageviews/sitelinks algorithm only ever applied to the Overpass fallback — meaning in
+  any city with a working OTM key, none of the v3.3.9 work was used (ranking was raw `otm_rate`).
+  `fetchPois` now: pick source → enrich → rank by `fameScore`, uniformly.
+- **`otm_rate` folded into `fameScore`** (`rate × 120`, rate is 0–7) so OTM-sourced POIs (which have
+  no OSM `wikipedia`/`heritage` tags) still carry OTM's own importance signal and rank coherently
+  alongside enriched values.
+
+### Current experiment (test build — timeouts at 300s)
+
+Live verification is impossible from the Claude sandbox (OTM/Overpass/Wikimedia hosts are
+firewalled). So this build ships a diagnostic harness — `PoiExperiment`, wired to
+**Settings → NERD STUFF → "Run POI API Experiment"** — that runs against the device's real location
+and logs (tag `PoiExperiment`, captured by *Export Full Log File*):
+
+1. **OTM `/places/kinds`** — the authoritative taxonomy dump.
+2. **Per-kind validity probe** — one request per candidate kind → which return 200 vs 400.
+3. **Combined-string probe** — reproduces the v3.3.9 400 and confirms the known-good v3.3.8 set.
+4. **Per-branch Overpass timing** — each famous-query branch isolated + timed (confirms the
+   `wikipedia_catchall` is the slow one) **and** measures proposed constrained replacements
+   (`alt_man_made_wiki`, `alt_worship_uni_wiki`, `alt_viewpoint_wiki`, `alt_historic_any_wiki`,
+   `alt_building_wiki`).
+5. **Wikidata + Pageviews response shapes** — to lock down parsing.
+
+**Open question the experiment answers:** can we replace the one unbounded `wikipedia` catch-all
+with several *constrained* `[selective_key][wikipedia]` branches that keep Reunion-Tower-class
+coverage while staying under the time budget? Feed the experiment log back here and we finalise the
+queries + the verified OTM kinds string, then drop the timeouts back to production values.
+
+**TODO once results are in:** record the verified-valid OTM kinds, the final famous-query branches,
+and the production timeout values here, and remove this "experiment" framing.
+
+---
+
 ## Overpass Fallback: Frozen at v3.3.2 Logic
+
+> ⚠️ **Superseded for v3.3.9+** — see "Famous POI Coverage & Ranking" above. Kept for history.
 
 ### The problem this note prevents
 

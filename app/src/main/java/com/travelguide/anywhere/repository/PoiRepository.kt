@@ -66,23 +66,48 @@ class PoiRepository @Inject constructor(
         val radiusMeters = (radiusMiles * 1609.34).toInt()
         val otmKey = prefs.getString(PREF_OPENTRIPMAP_KEY, "") ?: ""
 
-        if (otmKey.isNotBlank()) {
-            try {
-                val otmPois = fetchFromOpenTripMap(location, radiusMeters, famousMode, otmKey)
-                if (otmPois.size >= OTM_FALLBACK_THRESHOLD) {
-                    Log.d(TAG, "[OTM] Returning ${otmPois.size} POIs (famousMode=$famousMode)")
-                    return@withContext otmPois
+        // 1. Pick a source: OpenTripMap is primary, Overpass is the fallback.
+        var source = "overpass"
+        val rawPois: List<PlaceOfInterest> = run {
+            if (otmKey.isNotBlank()) {
+                try {
+                    val otmPois = fetchFromOpenTripMap(location, radiusMeters, famousMode, otmKey)
+                    if (otmPois.size >= OTM_FALLBACK_THRESHOLD) {
+                        source = "otm"
+                        Log.d(TAG, "[OTM] Using ${otmPois.size} POIs (famousMode=$famousMode)")
+                        return@run otmPois
+                    }
+                    Log.d(TAG, "[OTM] Only ${otmPois.size} results — falling back to Overpass")
+                } catch (e: Exception) {
+                    Log.w(TAG, "[OTM] Failed: ${e.message} — falling back to Overpass")
                 }
-                Log.d(TAG, "[OTM] Only ${otmPois.size} results — falling back to Overpass")
-            } catch (e: Exception) {
-                Log.w(TAG, "[OTM] Failed: ${e.message} — falling back to Overpass")
             }
+            fetchFromOverpass(location, radiusMeters, famousMode)
         }
 
-        val rawPois = fetchFromOverpass(location, radiusMeters, famousMode)
-        val enriched = try { enrichWithWikiData(rawPois) } catch (e: Exception) { rawPois }
-        if (famousMode) enriched.sortedByDescending { it.fameScore }
-        else enriched.sortedBy { it.distanceMeters }
+        // 2. Enrich with Wikipedia pageviews + Wikidata sitelinks. Runs for BOTH sources so the
+        //    fame-ranking algorithm applies whether the POIs came from OTM or Overpass.
+        val enriched = try {
+            enrichWithWikiData(rawPois)
+        } catch (e: Exception) {
+            Log.w(TAG, "[enrich] Failed: ${e.message}"); rawPois
+        }
+
+        // 3. Final ranking.
+        val sorted = if (famousMode) enriched.sortedByDescending { it.fameScore }
+                     else enriched.sortedBy { it.distanceMeters }
+
+        if (sorted.isNotEmpty()) {
+            val label = if (famousMode) "fame" else "dist"
+            Log.d(TAG, "[$source/$label] ${sorted.size} POIs ranked. Top 10:")
+            sorted.take(10).forEachIndexed { i, p ->
+                Log.d(TAG, "  #${i + 1} ${p.name} — fame=${p.fameScore} " +
+                    "rate=${p.tags["otm_rate"] ?: "-"} views=${p.tags["wiki_views"] ?: "-"} " +
+                    "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} type=${p.type} " +
+                    "dist=${"%.1f".format(p.distanceMiles)}mi")
+            }
+        }
+        sorted
     }
 
     // ── OpenTripMap ──────────────────────────────────────────────────────────
@@ -104,7 +129,7 @@ class PoiRepository @Inject constructor(
             radius = radiusMeters,
             lon = location.longitude,
             lat = location.latitude,
-            kinds = "interesting_places,museums,historic,architecture,natural,amusements,beaches",
+            kinds = "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens",
             rate = "1",
             orderby = if (famousMode) "rate" else "dist",
             limit = 100,
@@ -247,7 +272,8 @@ class PoiRepository @Inject constructor(
 
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String {
         val cap = if (radiusMeters > 30_000) 500 else 300
-        return "[out:json][timeout:45];\n" +
+        // TEST BUILD: server-side timeout raised to 300s while we profile query cost.
+        return "[out:json][timeout:300];\n" +
         "(\n" +
         "  node[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
@@ -265,8 +291,12 @@ class PoiRepository @Inject constructor(
     }
 
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        "[out:json][timeout:45];\n" +
+        // TEST BUILD: server-side timeout raised to 300s while we profile query cost. The broad
+        // wikipedia catch-all (line below) is the suspected timeout source — kept in for now so the
+        // PoiExperiment harness can measure it. See ENGINEERING_NOTES "Famous POI Coverage & Ranking".
+        "[out:json][timeout:300];\n" +
         "(\n" +
+        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +

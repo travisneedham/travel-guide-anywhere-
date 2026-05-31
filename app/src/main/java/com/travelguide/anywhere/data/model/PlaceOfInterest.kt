@@ -40,6 +40,9 @@ data class PlaceOfInterest(
             if (tags.containsKey("wikipedia")) score += 500
             else if (tags.containsKey("wikidata")) score += 150
         }
+        // OpenTripMap quality rating (0–7) — present only on OTM-sourced POIs. Folds OTM's own
+        // importance signal into the unified fameScore so OTM and Overpass results rank together.
+        tags["otm_rate"]?.toIntOrNull()?.let { if (it > 0) score += it * 120 }
         return score
     }
 
