@@ -1,14 +1,19 @@
 package com.travelguide.anywhere.ui.main
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Intent
+import android.content.SharedPreferences
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.FusedLocationProviderClient
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
 import com.travelguide.anywhere.data.model.LocationResult
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.RouteData
+import com.travelguide.anywhere.repository.PoiRepository
 import com.travelguide.anywhere.repository.RouteRepository
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.service.TourState
@@ -28,7 +33,28 @@ class MainViewModel @Inject constructor(
     private val mentionedPlacesStore: MentionedPlacesStore,
     private val narrationHistoryStore: NarrationHistoryStore,
     private val routeRepository: RouteRepository,
+    private val poiRepository: PoiRepository,
+    private val fusedLocation: FusedLocationProviderClient,
+    private val prefs: SharedPreferences,
 ) : AndroidViewModel(application) {
+
+    init {
+        // Pre-warm the POI fetch at app launch using the OS-cached coarse location, so a tour
+        // started moments later is an instant cache hit instead of a cold ~80s famous query.
+        // Best-effort: silently no-ops if location permission isn't granted yet.
+        prewarmFromLastLocation()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun prewarmFromLastLocation() {
+        try {
+            fusedLocation.lastLocation
+                .addOnSuccessListener { loc -> loc?.let { poiRepository.prewarm(it) } }
+                .addOnFailureListener { Log.d("MainViewModel", "prewarm: no last location") }
+        } catch (e: SecurityException) {
+            Log.d("MainViewModel", "prewarm: location permission not granted yet")
+        }
+    }
 
     sealed class RouteParseState {
         object Idle : RouteParseState()
@@ -106,6 +132,12 @@ class MainViewModel @Inject constructor(
     }
 
     fun startTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {
+        // Remember these so the next app-launch pre-warm targets the same parameters.
+        prefs.edit()
+            .putFloat(PoiRepository.PREF_LAST_RADIUS_MILES, radiusMiles)
+            .putBoolean(PoiRepository.PREF_LAST_FAMOUS_MODE, famousMode)
+            .apply()
+
         TourGuideService.tourState.value = TourState.LOCATING
         TourGuideService.currentTopic.value = ""
         TourGuideService.currentPois.value = emptyList()

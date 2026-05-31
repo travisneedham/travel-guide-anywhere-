@@ -539,29 +539,78 @@ Both changes were reverted to the v3.3.9 state.
   no OSM `wikipedia`/`heritage` tags) still carry OTM's own importance signal and rank coherently
   alongside enriched values.
 
-### Current experiment (test build — timeouts at 300s)
+### Experiment results (resolved — `PoiExperiment` harness, three field runs)
 
-Live verification is impossible from the Claude sandbox (OTM/Overpass/Wikimedia hosts are
-firewalled). So this build ships a diagnostic harness — `PoiExperiment`, wired to
-**Settings → NERD STUFF → "Run POI API Experiment"** — that runs against the device's real location
-and logs (tag `PoiExperiment`, captured by *Export Full Log File*):
+The `PoiExperiment` harness (Settings → NERD STUFF → "Run POI API Experiment") ran against a real
+device in Dallas. The clean run (`travel_guide_log_20260531_000430.txt`) completed end-to-end and
+settled every open question:
 
-1. **OTM `/places/kinds`** — the authoritative taxonomy dump.
-2. **Per-kind validity probe** — one request per candidate kind → which return 200 vs 400.
-3. **Combined-string probe** — reproduces the v3.3.9 400 and confirms the known-good v3.3.8 set.
-4. **Per-branch Overpass timing** — each famous-query branch isolated + timed (confirms the
-   `wikipedia_catchall` is the slow one) **and** measures proposed constrained replacements
-   (`alt_man_made_wiki`, `alt_worship_uni_wiki`, `alt_viewpoint_wiki`, `alt_historic_any_wiki`,
-   `alt_building_wiki`).
-5. **Wikidata + Pageviews response shapes** — to lock down parsing.
+- **OTM kinds.** Only `gardens`, `theme_parks`, `swimming_pools` are invalid (HTTP 400). The v3.3.9
+  string failed **solely because of `gardens`** — the valid identifier is `gardens_and_parks`. All
+  other v3.3.9 kinds (`stadiums`, `zoos`, `aquariums`, `natural`, `beaches`, `amusements`) are valid.
+  Fix shipped in v3.4.2; the combined `v3.4.2_fixed` probe returns HTTP 200. Confirmed-valid extras
+  available if ever needed: `cultural`, `religion`, `view_points`, `monuments_and_memorials`,
+  `towers`, `bridges`, `other_buildings_and_structures`, `water`, `nature_reserves`.
+- **Pageviews parser correct.** Shape verified: `{"items":[{…,"views":N}]}`, summed across months.
+  Caveat: the trailing month of the 3-month window is often partial (Eiffel Apr = 9 404 vs Mar =
+  310 077) — a known minor skew, revisit the date range later.
+- **🔴 Wikidata sitelinks were silently broken (fixed v3.4.3).** `wbgetentities` requires the **pipe**
+  `|` id separator; the code used a comma, so `ids=Q1,Q2…` was read as one literal id →
+  `no-such-entity` → **zero sitelinks for every multi-id batch since v3.3.9**. The `sitelinks × 35`
+  term contributed nothing, and POIs with a `wikidata` tag but no `wikipedia` tag also got no
+  pageviews (no enwiki title to query). Fixed: `joinToString(",")` → `joinToString("|")`.
 
-**Open question the experiment answers:** can we replace the one unbounded `wikipedia` catch-all
-with several *constrained* `[selective_key][wikipedia]` branches that keep Reunion-Tower-class
-coverage while staying under the time budget? Feed the experiment log back here and we finalise the
-queries + the verified OTM kinds string, then drop the timeouts back to production values.
+### Famous-query architecture (v3.4.3 — parallel shards + pre-warm)
 
-**TODO once results are in:** record the verified-valid OTM kinds, the final famous-query branches,
-and the production timeout values here, and remove this "experiment" framing.
+**The real bottleneck: 171s.** The full single famous query measured **171s** end-to-end. Overpass
+executes union branches **sequentially server-side** (confirmed via its run-time-model docs), so an
+18-branch union is the sum of its branches. overpass-api.de grants **2 request slots per IP**, so we
+now split the query into **two shards POSTed concurrently** — wall time ≈ the slower shard (~80-90s
+projected), roughly a 2× win. `buildFamousQueryShards()` returns the two shard queries;
+`fetchFromOverpass()` runs them with `async { … }.awaitAll()` and merges/dedupes by `osmId`.
+
+- **Shard A** (fast, high-yield): wikipedia catch-all, tourism+wiki, heritage, historic, stadium+wiki,
+  aerialway, plus **new way-inclusive `building`+wiki and `man_made`+wiki branches**.
+- **Shard B** (slow coverage, 0-in-Dallas but globally vital): square / garden / marketplace / beach /
+  peak / nature_reserve / cemetery — all `[wikipedia]`-gated.
+
+**Branch query optimisation.** `tourism` and `stadium` now require `["wikipedia"]`. In famous mode
+only wiki-notable POIs earn a non-zero `fameScore` anyway, and this cut those branches from
+~16s/~22s to ~6-7s each in testing.
+
+**Node-only catch-all gap closed.** The `wikipedia` catch-all is `node`-only, and famous squares /
+gardens / markets / buildings are mapped as **areas (ways/relations)**. That's why the dedicated
+`way[...][wikipedia]` branches are **not** redundant and must stay (cutting them would re-hide the
+Reunion-Tower class). v3.4.3 also adds `way["building"]["wikipedia"]` + `man_made`+wiki to catch
+area-mapped famous structures the node-only catch-all missed.
+
+**Why we did NOT cut the 0-result branches.** Zero results in Dallas ≠ useless globally —
+`place=square`+wiki catches Tiananmen Square, `leisure=garden`+wiki catches Butchart Gardens, etc.
+Per OSM convention these are polygons, invisible to the node-only catch-all. Coverage wins over speed.
+
+### Pre-warm / cache (v3.4.3)
+
+- **Pre-warm at launch.** `MainViewModel.init` reads `FusedLocationProvider.lastLocation` (OS-cached,
+  no GPS wait) and calls `PoiRepository.prewarm()`, which fetches in the background using the
+  **last radius/mode** the user ran (persisted by `startTour` to `PREF_LAST_RADIUS_MILES` /
+  `PREF_LAST_FAMOUS_MODE`). By the time the user taps Start Tour, the result is usually ready.
+- **In-flight de-dup.** A `ConcurrentHashMap<key, Deferred>` ensures a pre-warm and the later
+  Start-Tour fetch collapse into one network round-trip; `fetchPois` awaits the pending job.
+- **Geohash cache.** Results are cached in SharedPreferences keyed by `geohash(precision 4)` (~20-40km
+  cell) + mode + radius, TTL **6h**. On a hit, per-POI distances are recomputed for the real location
+  and re-ranked, so coarse pre-warm location never corrupts ordering.
+- **OTM stays primary** (~300ms); the shards are the fallback. OTM is pre-warmed too via the same path.
+
+### Production timeouts (v3.4.3 — reverted from the 300s test build)
+
+| Setting | Value |
+|---|---|
+| Overpass `[timeout:N]` per shard | `120` |
+| OkHttp Overpass client `callTimeout`/`readTimeout` | `125s` (derived client in `PoiRepository`) |
+| Global OkHttp `connect`/`write`/`read`/`call` | `15` / `30` / `125` / `125` s |
+| OTM Retrofit client `callTimeout`/`readTimeout` | `30s` (derived in `AppModule`) |
+
+The `PoiExperiment` harness itself still uses `[timeout:300]` — it's a diagnostic tool, left as-is.
 
 ---
 

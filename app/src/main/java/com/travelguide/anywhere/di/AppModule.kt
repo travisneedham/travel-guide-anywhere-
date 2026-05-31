@@ -33,12 +33,12 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
-            // TEST BUILD: timeouts widened to 5 minutes so the PoiExperiment harness can profile
-            // slow Overpass/OTM queries without the client aborting them. Revert before release.
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(300, TimeUnit.SECONDS)
-            .readTimeout(300, TimeUnit.SECONDS)
-            .callTimeout(300, TimeUnit.SECONDS)
+            // Production timeouts. PoiRepository derives a longer-ceiling client for Overpass shards
+            // (~120s server-side budget) from this one; everything else (Wiki, Claude, images) is fast.
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(125, TimeUnit.SECONDS)
+            .callTimeout(125, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 // Set a descriptive User-Agent on every request (including Coil image loads).
                 // Wikimedia's CDN blocks OkHttp's default "okhttp/x.y.z" agent.
@@ -95,7 +95,9 @@ object AppModule {
     fun provideOpenTripMapService(client: OkHttpClient, gson: Gson): OpenTripMapService =
         Retrofit.Builder()
             .baseUrl(OpenTripMapService.BASE_URL)
-            .client(client)
+            // OTM (primary source) normally responds in ~300ms; cap it at 30s so a stalled OTM
+            // call can't block the whole fetch behind the client's 125s Overpass ceiling.
+            .client(client.newBuilder().callTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build())
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(OpenTripMapService::class.java)

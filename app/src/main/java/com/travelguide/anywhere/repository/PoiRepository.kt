@@ -12,7 +12,11 @@ import com.travelguide.anywhere.data.remote.OpenTripMapService
 import com.travelguide.anywhere.data.remote.dto.OpenTripMapPlace
 import com.travelguide.anywhere.data.remote.dto.OverpassElement
 import com.travelguide.anywhere.data.remote.dto.OverpassResponse
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +25,8 @@ import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -54,14 +60,99 @@ class PoiRepository @Inject constructor(
         private const val PREF_WIKI_VIEWS_PREFIX = "wiki_v_"
         private const val PREF_WIKI_SLINKS_PREFIX = "wiki_s_"
         private const val ENRICH_LIMIT = 25
+
+        // Pre-warm / POI-list cache. The famous query is expensive (see ENGINEERING_NOTES); we cache
+        // the fully-ranked result by coarse location so a tour started shortly after app launch is
+        // an instant cache hit. Famous landmarks don't move, so a 6h TTL is safe.
+        private const val POI_CACHE_TTL_MS = 6L * 60 * 60 * 1000  // 6 hours
+        private const val PREF_POI_CACHE_PREFIX = "poi_cache_"
+        private const val GEOHASH_PRECISION = 4  // ~20-40km cell, matches our 40-mile query radius
+
+        // Last radius/mode the user ran a tour with — written by MainViewModel.startTour and read by
+        // prewarm() so the launch-time fetch targets the parameters the user is most likely to reuse.
+        const val PREF_LAST_RADIUS_MILES = "pref_last_radius_miles"
+        const val PREF_LAST_FAMOUS_MODE = "pref_last_famous_mode"
+
+        private const val OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
+        // Per-shard server-side budget. overpass-api.de grants 2 slots per IP, so 2 shards run truly
+        // concurrently. 120s covers the slowest expected shard with headroom.
+        private const val OVERPASS_SHARD_TIMEOUT_SEC = 120
+        private const val OVERPASS_CALL_TIMEOUT_SEC = 125L  // OkHttp ceiling = server timeout + overhead
+
+        private const val GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
     }
 
     private data class WikidataResult(val sitelinkCount: Int, val enwikiTitle: String?)
+
+    /** Persistent-cache envelope: timestamp + the ranked POI list (fameScore is recomputed, not stored). */
+    private data class PoiCacheEnvelope(val ts: Long, val pois: List<PlaceOfInterest>)
+
+    /** Repo-owned scope so prewarm() outlives the caller (Fragment/ViewModel) that triggered it. */
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** De-dupes a prewarm fetch and the later "Start Tour" fetch into a single network round-trip. */
+    private val inFlight = ConcurrentHashMap<String, Deferred<List<PlaceOfInterest>>>()
+
+    /** Overpass needs a long ceiling; OTM/Wiki calls use the shared client. Shares the connection pool. */
+    private val overpassClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(OVERPASS_CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .readTimeout(OVERPASS_CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * Kick off a POI fetch as soon as a coarse location is known (typically app launch), so the
+     * result is cached/in-flight by the time the user taps "Start Tour". Uses the radius/mode the
+     * user last ran with. Fire-and-forget: safe to call repeatedly — duplicate keys are ignored.
+     */
+    fun prewarm(location: Location) {
+        val famousMode = prefs.getBoolean(PREF_LAST_FAMOUS_MODE, false)
+        val radiusMiles = prefs.getFloat(PREF_LAST_RADIUS_MILES, 5f)
+        val key = cacheKey(location, radiusMiles, famousMode)
+        if (inFlight.containsKey(key) || cachedPois(key) != null) {
+            Log.d(TAG, "[prewarm] already warm for $key — skipping")
+            return
+        }
+        Log.d(TAG, "[prewarm] starting fetch for $key (radius=${radiusMiles}mi, famous=$famousMode)")
+        val job = repoScope.async {
+            try { fetchPoisInternal(location, radiusMiles, famousMode, key) }
+            finally { inFlight.remove(key) }
+        }
+        inFlight[key] = job
+    }
 
     suspend fun fetchPois(
         location: Location,
         radiusMiles: Float,
         famousMode: Boolean = false
+    ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
+        val key = cacheKey(location, radiusMiles, famousMode)
+
+        // 0a. Join an in-flight prewarm for the same cell/params instead of issuing a 2nd request.
+        inFlight[key]?.let { pending ->
+            try {
+                Log.d(TAG, "[fetchPois] joining in-flight prewarm for $key")
+                return@withContext rerankForLocation(pending.await(), location, famousMode)
+            } catch (e: Exception) {
+                Log.w(TAG, "[fetchPois] in-flight prewarm failed (${e.message}) — fetching fresh")
+                inFlight.remove(key)
+            }
+        }
+        // 0b. Serve a fresh persistent-cache hit (distances recomputed for the real location).
+        cachedPois(key)?.let { cached ->
+            Log.d(TAG, "[fetchPois] cache HIT for $key (${cached.size} POIs)")
+            return@withContext rerankForLocation(cached, location, famousMode)
+        }
+
+        fetchPoisInternal(location, radiusMiles, famousMode, key)
+    }
+
+    private suspend fun fetchPoisInternal(
+        location: Location,
+        radiusMiles: Float,
+        famousMode: Boolean,
+        cacheKey: String,
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
         val otmKey = prefs.getString(PREF_OPENTRIPMAP_KEY, "") ?: ""
@@ -106,6 +197,7 @@ class PoiRepository @Inject constructor(
                     "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} type=${p.type} " +
                     "dist=${"%.1f".format(p.distanceMiles)}mi")
             }
+            cachePois(cacheKey, sorted)
         }
         sorted
     }
@@ -205,44 +297,31 @@ class PoiRepository @Inject constructor(
         location: Location,
         radiusMeters: Int,
         famousMode: Boolean,
-    ): List<PlaceOfInterest> {
+    ): List<PlaceOfInterest> = coroutineScope {
         val mode = if (famousMode) "famous" else "nearby"
         Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMeters}m")
 
-        val query = if (famousMode)
-            buildFamousQuery(location.latitude, location.longitude, radiusMeters)
+        // Famous mode runs as parallel shards: overpass-api.de executes union branches sequentially
+        // server-side, so one 18-branch query took ~171s. Splitting across the 2 slots overpass-api.de
+        // grants per IP lets the shards run concurrently — wall time ≈ the slowest shard. See
+        // ENGINEERING_NOTES "Famous POI Coverage & Ranking" for the research behind this.
+        val queries = if (famousMode)
+            buildFamousQueryShards(location.latitude, location.longitude, radiusMeters)
         else
-            buildNearbyQuery(location.latitude, location.longitude, radiusMeters)
+            listOf(buildNearbyQuery(location.latitude, location.longitude, radiusMeters))
 
-        val body = FormBody.Builder()
-            .add("data", query)
-            .build()
+        val t0 = System.currentTimeMillis()
+        val shardResults = queries.mapIndexed { i, q ->
+            async { postOverpass(q, "$mode#${i + 1}") }
+        }.awaitAll()
+        Log.d(TAG, "[$mode] ${queries.size} shard(s) completed in ${System.currentTimeMillis() - t0}ms")
 
-        val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
-            .post(body)
-            .header("Accept", "*/*")
-            .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
-            .build()
-
-        val responseJson = okHttpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("Overpass HTTP ${response.code}: ${response.body?.string()?.take(200)}")
-            }
-            response.body?.string() ?: throw Exception("Empty response from Overpass")
+        val elements = shardResults.flatten()
+        if (elements.isEmpty()) {
+            throw Exception("Overpass query returned no elements for all ${queries.size} shard(s)")
         }
 
-        val overpassResponse = gson.fromJson(responseJson, OverpassResponse::class.java)
-
-        if (!overpassResponse.remark.isNullOrBlank()) {
-            Log.w(TAG, "[$mode] Overpass remark: ${overpassResponse.remark}")
-            if (overpassResponse.elements.isEmpty()) {
-                throw Exception("Overpass query failed: ${overpassResponse.remark}")
-            }
-        }
-
-        val raw = overpassResponse.elements.size
-        val pois = overpassResponse.elements
+        val pois = elements
             .filter { it.tags.containsKey("name") }
             .filter { element ->
                 element.tags["shop"] == null || element.tags["historic"] != null
@@ -250,13 +329,41 @@ class PoiRepository @Inject constructor(
             .filter { element ->
                 element.tags["place"]?.let { it !in ADMIN_PLACE_TYPES } ?: true
             }
+            .distinctBy { it.osmId }  // merge overlap between shards before mapping
             .map { element -> element.toPlaceOfInterest(location) }
             .filter { poi -> isTypeEnabled(poi.type) }
             .distinctBy { it.name }
             .sortedByDescending { it.fameScore }  // pre-sort so ENRICH_LIMIT targets most promising
 
-        Log.d(TAG, "[$mode] Overpass returned $raw elements → ${pois.size} named POIs")
-        return pois
+        Log.d(TAG, "[$mode] Overpass returned ${elements.size} elements → ${pois.size} named POIs")
+        pois
+    }
+
+    /** POST one Overpass query and return its elements. Tolerates partial (timeout-remark) results. */
+    private fun postOverpass(query: String, tag: String): List<OverpassElement> {
+        val body = FormBody.Builder().add("data", query).build()
+        val request = Request.Builder()
+            .url(OVERPASS_ENDPOINT)
+            .post(body)
+            .header("Accept", "*/*")
+            .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+            .build()
+
+        val responseJson = overpassClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Overpass HTTP ${response.code}: ${response.body?.string()?.take(200)}")
+            }
+            response.body?.string() ?: throw Exception("Empty response from Overpass")
+        }
+
+        val parsed = gson.fromJson(responseJson, OverpassResponse::class.java)
+        // Overpass signals a server-side timeout/memory abort with HTTP 200 + a `remark`, not an
+        // error code. Keep whatever partial elements came back; only fail if nothing did.
+        if (!parsed.remark.isNullOrBlank()) {
+            Log.w(TAG, "[$tag] Overpass remark: ${parsed.remark} (got ${parsed.elements.size} elements)")
+            if (parsed.elements.isEmpty()) throw Exception("Overpass shard failed: ${parsed.remark}")
+        }
+        return parsed.elements
     }
 
     private fun isTypeEnabled(type: PoiType): Boolean = when (type) {
@@ -272,8 +379,7 @@ class PoiRepository @Inject constructor(
 
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String {
         val cap = if (radiusMeters > 30_000) 500 else 300
-        // TEST BUILD: server-side timeout raised to 300s while we profile query cost.
-        return "[out:json][timeout:300];\n" +
+        return "[out:json][timeout:$OVERPASS_SHARD_TIMEOUT_SEC];\n" +
         "(\n" +
         "  node[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"historic\"](around:$radiusMeters,$lat,$lon);\n" +
@@ -290,37 +396,53 @@ class PoiRepository @Inject constructor(
         "out body center $cap;"
     }
 
-    private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
-        // TEST BUILD: server-side timeout raised to 300s while we profile query cost. The broad
-        // wikipedia catch-all (line below) is the suspected timeout source — kept in for now so the
-        // PoiExperiment harness can measure it. See ENGINEERING_NOTES "Famous POI Coverage & Ranking".
-        "[out:json][timeout:300];\n" +
-        "(\n" +
-        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial|palace|city_wall|city_gate|pagoda|temple\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial|palace|city_wall|city_gate|pagoda|temple\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"leisure\"=\"stadium\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"leisure\"=\"stadium\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"place\"=\"square\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"place\"=\"square\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"leisure\"=\"garden\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"leisure\"=\"garden\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"amenity\"=\"marketplace\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"amenity\"=\"marketplace\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"natural\"=\"beach\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"natural\"=\"beach\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"natural\"=\"peak\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"leisure\"=\"nature_reserve\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"leisure\"=\"nature_reserve\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  node[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"](around:$radiusMeters,$lat,$lon);\n" +
-        "  way[\"name\"][\"landuse\"=\"cemetery\"][\"wikipedia\"](around:$radiusMeters,$lat,$lon);\n" +
-        ");\n" +
-        "out body center 300;"
+    /**
+     * The famous query split into concurrent shards. See ENGINEERING_NOTES "Famous POI Coverage &
+     * Ranking" for the per-branch timing data and rationale.
+     *
+     * Shard A = fast, high-yield branches (cheap, contain most headline POIs). Shard B = the slow
+     * coverage branches (squares/gardens/markets/beaches/peaks/reserves) that return 0 in Dallas but
+     * catch globally-famous area-mapped landmarks elsewhere (Tiananmen Square, Butchart Gardens, …).
+     *
+     * Two changes vs the old single query:
+     *  - `tourism` and `stadium` now require `["wikipedia"]`. In famous mode only wiki-notable POIs
+     *    earn a non-zero fameScore anyway, and this cuts those branches from ~16-22s to ~6-7s.
+     *  - Added way-inclusive `building`/`man_made`+wikipedia branches. The old catch-all was
+     *    node-only, so area-mapped famous buildings/towers (the Reunion-Tower class) were invisible.
+     */
+    private fun buildFamousQueryShards(lat: Double, lon: Double, radiusMeters: Int): List<String> {
+        val a = "around:$radiusMeters,$lat,$lon"
+        fun shard(vararg branches: String): String =
+            "[out:json][timeout:$OVERPASS_SHARD_TIMEOUT_SEC];\n(\n" +
+                branches.joinToString("\n") + "\n);\nout body center 300;"
+
+        val shardA = shard(
+            // node-only wikipedia catch-all + way-inclusive building/man_made closes the area gap
+            "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"]($a);",
+            "  way[\"name\"][\"building\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"man_made\"~\"tower|bridge|lighthouse|obelisk\"][\"wikipedia\"]($a);\n" +
+            "  way[\"name\"][\"man_made\"~\"tower|bridge|lighthouse|obelisk\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"][\"wikipedia\"]($a);\n" +
+            "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"heritage\"]($a);\n  way[\"name\"][\"heritage\"]($a);",
+            "  node[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial|palace|city_wall|city_gate|pagoda|temple\"]($a);\n" +
+            "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial|palace|city_wall|city_gate|pagoda|temple\"]($a);",
+            "  node[\"name\"][\"leisure\"=\"stadium\"][\"wikipedia\"]($a);\n  way[\"name\"][\"leisure\"=\"stadium\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"]($a);\n  way[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"]($a);",
+        )
+
+        val shardB = shard(
+            "  node[\"name\"][\"place\"=\"square\"][\"wikipedia\"]($a);\n  way[\"name\"][\"place\"=\"square\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"leisure\"=\"garden\"][\"wikipedia\"]($a);\n  way[\"name\"][\"leisure\"=\"garden\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"amenity\"=\"marketplace\"][\"wikipedia\"]($a);\n  way[\"name\"][\"amenity\"=\"marketplace\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"natural\"=\"beach\"][\"wikipedia\"]($a);\n  way[\"name\"][\"natural\"=\"beach\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"natural\"=\"peak\"][\"wikipedia\"]($a);",
+            "  node[\"name\"][\"leisure\"=\"nature_reserve\"][\"wikipedia\"]($a);\n  way[\"name\"][\"leisure\"=\"nature_reserve\"][\"wikipedia\"]($a);",
+            "  way[\"name\"][\"landuse\"=\"cemetery\"][\"wikipedia\"]($a);",
+        )
+
+        return listOf(shardA, shardB)
+    }
 
     private fun OverpassElement.toPlaceOfInterest(userLocation: Location): PlaceOfInterest {
         val results = FloatArray(1)
@@ -404,8 +526,11 @@ class PoiRepository @Inject constructor(
         }
         for (chunk in uncached.chunked(50)) {
             try {
+                // wbgetentities requires PIPE-separated ids. Comma was silently treated as one
+                // literal id ("Q1,Q2…" → no-such-entity), so sitelinks enrichment returned nothing
+                // for every multi-id batch since v3.3.9. Confirmed by the PoiExperiment log.
                 val url = "https://www.wikidata.org/w/api.php?action=wbgetentities" +
-                    "&ids=${chunk.joinToString(",")}&props=sitelinks&format=json"
+                    "&ids=${chunk.joinToString("|")}&props=sitelinks&format=json"
                 val request = Request.Builder().url(url)
                     .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)").build()
                 val body = okHttpClient.newCall(request).execute().use { r ->
@@ -501,5 +626,71 @@ class PoiRepository @Inject constructor(
             "$PREF_WIKI_SLINKS_PREFIX$qid",
             "${result.sitelinkCount}|${result.enwikiTitle ?: ""}|${System.currentTimeMillis()}"
         ).apply()
+    }
+
+    // ── POI-list cache + geohash (pre-warm support) ───────────────────────────
+
+    private fun cacheKey(location: Location, radiusMiles: Float, famousMode: Boolean): String {
+        val cell = geohash(location.latitude, location.longitude, GEOHASH_PRECISION)
+        val mode = if (famousMode) "f" else "n"
+        return "$PREF_POI_CACHE_PREFIX${cell}_${mode}_%.2f".format(radiusMiles)
+    }
+
+    private fun cachedPois(key: String): List<PlaceOfInterest>? {
+        val raw = prefs.getString(key, null) ?: return null
+        return try {
+            val type = object : TypeToken<PoiCacheEnvelope>() {}.type
+            val env = gson.fromJson<PoiCacheEnvelope>(raw, type) ?: return null
+            if (System.currentTimeMillis() - env.ts > POI_CACHE_TTL_MS) {
+                prefs.edit().remove(key).apply(); null
+            } else env.pois
+        } catch (e: Exception) {
+            Log.w(TAG, "[cache] read failed for $key: ${e.message}"); null
+        }
+    }
+
+    private fun cachePois(key: String, pois: List<PlaceOfInterest>) {
+        try {
+            val json = gson.toJson(PoiCacheEnvelope(System.currentTimeMillis(), pois))
+            prefs.edit().putString(key, json).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "[cache] write failed for $key: ${e.message}")
+        }
+    }
+
+    /** Recompute each POI's distance from the *actual* tour location (cache holds coarse distances)
+     *  and re-sort for the requested mode. Famous mode sorts by fame; nearby by distance. */
+    private fun rerankForLocation(
+        pois: List<PlaceOfInterest>,
+        location: Location,
+        famousMode: Boolean,
+    ): List<PlaceOfInterest> {
+        val results = FloatArray(1)
+        val withDistance = pois.map { p ->
+            Location.distanceBetween(location.latitude, location.longitude, p.lat, p.lon, results)
+            p.copy(distanceMeters = results[0])
+        }
+        return if (famousMode) withDistance.sortedByDescending { it.fameScore }
+               else withDistance.sortedBy { it.distanceMeters }
+    }
+
+    /** Minimal geohash encoder (no extra dependency). Precision 4 ≈ a ~20-40 km cell. */
+    private fun geohash(lat: Double, lon: Double, precision: Int): String {
+        var latMin = -90.0; var latMax = 90.0
+        var lonMin = -180.0; var lonMax = 180.0
+        val sb = StringBuilder()
+        var bit = 0; var ch = 0; var even = true
+        while (sb.length < precision) {
+            if (even) {
+                val mid = (lonMin + lonMax) / 2
+                if (lon >= mid) { ch = ch or (1 shl (4 - bit)); lonMin = mid } else lonMax = mid
+            } else {
+                val mid = (latMin + latMax) / 2
+                if (lat >= mid) { ch = ch or (1 shl (4 - bit)); latMin = mid } else latMax = mid
+            }
+            even = !even
+            if (bit < 4) bit++ else { sb.append(GEOHASH_BASE32[ch]); bit = 0; ch = 0 }
+        }
+        return sb.toString()
     }
 }
