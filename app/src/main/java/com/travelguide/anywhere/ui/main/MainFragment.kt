@@ -48,6 +48,7 @@ class MainFragment : Fragment() {
     private var tourIsActive = false
     private var blockModeChange = false
     private var searchDebounceJob: Job? = null
+    private var fetchTimerJob: Job? = null
     private var selectedLocationText: String? = null
     private var savedRadiusIndex = DEFAULT_RADIUS_INDEX
 
@@ -228,6 +229,7 @@ class MainFragment : Fragment() {
             }
         }
         binding.btnStop.setOnClickListener { viewModel.stopTour() }
+        binding.btnRetryFetch.setOnClickListener { viewModel.retryFetch() }
         binding.btnPause.setOnClickListener { viewModel.pauseOrResume() }
         binding.btnSkip.setOnClickListener { viewModel.skip() }
         binding.btnDeepDive.setOnClickListener { viewModel.toggleDeepDive() }
@@ -359,7 +361,30 @@ class MainFragment : Fragment() {
     private fun observeState() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { viewModel.tourState.collect { updateUiForState(it) } }
+                launch {
+                    viewModel.tourState.collect { state ->
+                        updateUiForState(state)
+                        if (state == TourState.FETCHING) {
+                            val fetchLabel = when {
+                                isFamousFirst -> "Finding famous landmarks…"
+                                isTripMode -> "Finding places along route…"
+                                else -> getString(R.string.status_fetching)
+                            }
+                            val t0 = System.currentTimeMillis()
+                            fetchTimerJob?.cancel()
+                            fetchTimerJob = lifecycleScope.launch {
+                                while (isActive) {
+                                    val elapsed = (System.currentTimeMillis() - t0) / 1000
+                                    binding.tvStatus.text = "$fetchLabel (${elapsed}s)"
+                                    delay(1_000L)
+                                }
+                            }
+                        } else {
+                            fetchTimerJob?.cancel()
+                            fetchTimerJob = null
+                        }
+                    }
+                }
                 launch {
                     combine(viewModel.tourState, viewModel.loadingProgress) { state, progress ->
                         state to progress
@@ -433,10 +458,11 @@ class MainFragment : Fragment() {
 
     private fun updateUiForState(state: TourState) {
         val isActive = state != TourState.IDLE && state != TourState.ERROR
-        binding.btnGo.visibility = if (isActive) View.GONE else View.VISIBLE
+        binding.btnGo.visibility = if (isActive || state == TourState.ERROR) View.GONE else View.VISIBLE
         binding.btnStop.visibility = if (isActive) View.VISIBLE else View.GONE
-        binding.cardStatus.visibility = if (isActive) View.VISIBLE else View.GONE
-        binding.tvIdle.visibility = if (isActive) View.GONE else View.VISIBLE
+        binding.cardStatus.visibility = if (isActive || state == TourState.ERROR) View.VISIBLE else View.GONE
+        binding.btnRetryFetch.visibility = if (state == TourState.ERROR) View.VISIBLE else View.GONE
+        binding.tvIdle.visibility = if (isActive || state == TourState.ERROR) View.GONE else View.VISIBLE
         tourIsActive = isActive
         binding.toggleMode.alpha = if (isActive) 0.78f else 1.0f
         binding.toggleSort.alpha = if (isActive) 0.78f else 1.0f
@@ -520,7 +546,7 @@ class MainFragment : Fragment() {
         binding.progressIndicator.visibility = when (state) {
             TourState.LOCATING, TourState.FETCHING, TourState.GENERATING,
             TourState.LOADING_AUDIO, TourState.NO_NEW_POIS -> View.VISIBLE
-            else -> View.GONE
+            else -> View.GONE  // ERROR shows the Retry button instead of a spinner
         }
     }
 

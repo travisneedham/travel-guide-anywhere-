@@ -297,6 +297,19 @@
                         tools:text="Speaking" />
                 </LinearLayout>
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_retry_fetch"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Retry"
+                    android:visibility="gone"
+                    app:icon="@drawable/ic_play"
+                    app:iconGravity="textStart"
+                    app:iconSize="18dp"
+                    app:iconPadding="6dp" />
+
                 <TextView
                     android:id="@+id/tv_current_topic"
                     android:layout_width="match_parent"

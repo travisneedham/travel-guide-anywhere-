@@ -18,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -68,6 +69,7 @@ class PoiRepository @Inject constructor(
         const val PREF_LAST_FAMOUS_MODE = "pref_last_famous_mode"
 
         private const val OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
+        private const val OVERPASS_MIRROR_ENDPOINT = "https://overpass.kumi.systems/api/interpreter"
         // Per-shard server-side budget. overpass-api.de grants 2 slots per IP, so 2 shards run truly
         // concurrently. 120s covers the slowest expected shard with headroom.
         private const val OVERPASS_SHARD_TIMEOUT_SEC = 120
@@ -186,7 +188,7 @@ class PoiRepository @Inject constructor(
         location: Location,
         radiusMeters: Int,
         famousMode: Boolean,
-    ): List<PlaceOfInterest> = coroutineScope {
+    ): List<PlaceOfInterest> {
         val mode = if (famousMode) "famous" else "nearby"
         Log.d(TAG, "[$mode] Querying Overpass: radius=${radiusMeters}m")
 
@@ -200,12 +202,21 @@ class PoiRepository @Inject constructor(
             listOf(buildNearbyQuery(location.latitude, location.longitude, radiusMeters))
 
         val t0 = System.currentTimeMillis()
-        val shardResults = queries.mapIndexed { i, q ->
-            async { postOverpass(q, "$mode#${i + 1}") }
-        }.awaitAll()
+        // supervisorScope lets one shard fail without cancelling its sibling — we use whatever
+        // results we got rather than discarding everything when (e.g.) shardB times out.
+        val shardResults: List<Result<List<OverpassElement>>> = supervisorScope {
+            queries.mapIndexed { i, q ->
+                async { runCatching { postOverpass(q, "$mode#${i + 1}") } }
+            }.awaitAll()
+        }
         Log.d(TAG, "[$mode] ${queries.size} shard(s) completed in ${System.currentTimeMillis() - t0}ms")
 
-        val elements = shardResults.flatten()
+        val succeeded = shardResults.filter { it.isSuccess }
+        if (succeeded.isEmpty()) throw shardResults.first { it.isFailure }.exceptionOrNull()!!
+        shardResults.forEachIndexed { i, r ->
+            if (r.isFailure) Log.w(TAG, "[$mode#${i + 1}] shard failed — partial results used: ${r.exceptionOrNull()?.message}")
+        }
+        val elements = succeeded.flatMap { it.getOrThrow() }
         if (elements.isEmpty()) {
             throw Exception("Overpass query returned no elements for all ${queries.size} shard(s)")
         }
@@ -225,14 +236,30 @@ class PoiRepository @Inject constructor(
             .sortedByDescending { it.fameScore }  // pre-sort so ENRICH_LIMIT targets most promising
 
         Log.d(TAG, "[$mode] Overpass returned ${elements.size} elements → ${pois.size} named POIs")
-        pois
+        return pois
     }
 
-    /** POST one Overpass query and return its elements. Tolerates partial (timeout-remark) results. */
+    /** Try the primary endpoint first; on 504/503/429, retry on the kumi.systems mirror. */
     private fun postOverpass(query: String, tag: String): List<OverpassElement> {
+        var lastEx: Exception? = null
+        for (endpoint in listOf(OVERPASS_ENDPOINT, OVERPASS_MIRROR_ENDPOINT)) {
+            try {
+                return postOverpassToEndpoint(endpoint, query, tag)
+            } catch (e: Exception) {
+                lastEx = e
+                val msg = e.message ?: ""
+                if ("HTTP 504" !in msg && "HTTP 503" !in msg && "HTTP 429" !in msg) throw e
+                Log.w(TAG, "[$tag] $endpoint → ${e.message}, retrying on mirror…")
+            }
+        }
+        throw lastEx!!
+    }
+
+    /** POST one Overpass query to a specific endpoint. Tolerates partial (timeout-remark) results. */
+    private fun postOverpassToEndpoint(endpoint: String, query: String, tag: String): List<OverpassElement> {
         val body = FormBody.Builder().add("data", query).build()
         val request = Request.Builder()
-            .url(OVERPASS_ENDPOINT)
+            .url(endpoint)
             .post(body)
             .header("Accept", "*/*")
             .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
@@ -554,6 +581,11 @@ class PoiRepository @Inject constructor(
      * lose it on upgrade; the 6h TTL handles staleness on its own.
      */
     fun clearPoiCaches() {
+        // Cancel orphaned prewarm coroutines before clearing the map so they release their
+        // Overpass slots. Blocking HTTP calls can't be interrupted mid-flight but will
+        // discard results once the coroutine is marked cancelled.
+        inFlight.values.forEach { it.cancel() }
+        inFlight.clear()
         val editor = prefs.edit()
         // Snapshot the keys first — don't mutate the map backing prefs.all while iterating it.
         prefs.all.keys.toList()
@@ -564,7 +596,6 @@ class PoiRepository @Inject constructor(
             }
             .forEach { editor.remove(it) }
         editor.apply()
-        inFlight.clear()
         Log.d(TAG, "[cache] cleared all POI + wiki enrichment caches")
     }
 

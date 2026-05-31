@@ -647,6 +647,24 @@ now-correct Overpass results clear the old v3.4.3 OTM entry naturally. A manual 
 Places"** button (Settings → NERD STUFF, calls `PoiRepository.clearPoiCaches()`) wipes the POI list
 and Wikipedia/Wikidata enrichment caches on demand for testing/troubleshooting.
 
+### v3.4.5 — Overpass resilience, retry cap, and FETCHING UX
+
+A field log (`travel_guide_log_20260531_170308.txt`) revealed the app appearing stuck during famous-mode fetches. Three root causes were diagnosed and fixed:
+
+**1. `awaitAll()` all-or-nothing shard failure.** In `PoiRepository.fetchFromOverpass`, the two famous-mode shards were launched with `async { postOverpass(...) }.awaitAll()`. If shardB timed out, `awaitAll()` threw immediately — discarding shardA's 300 results — and the whole fetch failed. The 15s retry then fired with 2 fresh shards, competing with the still-running previous shards for the 2-slot budget on `overpass-api.de`, producing instant 504s.
+
+Fix: replaced `coroutineScope { async{}.awaitAll() }` with `supervisorScope { async { runCatching { postOverpass(...) } }.awaitAll() }`. With this pattern, a failing shard returns a `Result.failure` and doesn't cancel its sibling. Whatever shards succeed contribute their elements; only when *all* shards fail does the fetch throw.
+
+**2. Infinite retry with no slot awareness.** The catch block in `TourGuideService.startGenerationCycle` retried unconditionally on a 15s fixed delay with no cap, keeping the 504 cascade alive for minutes (retries kept consuming slots, preventing recovery). Fixed by adding `fetchRetryCount` with `MAX_FETCH_RETRIES = 3` and exponential backoff (15s, 30s, 60s). On the third failure the service transitions to `TourState.ERROR` and stops retrying — the user sees a Retry button.
+
+**3. `clearPoiCaches()` didn't cancel orphaned prewarm coroutines.** Calling `inFlight.clear()` removed map entries but left running `repoScope.async{}` jobs holding their Overpass slots. When a user tapped "Clear Cached Places" then "Start Tour", up to 4 slots (2 prewarm + 2 new) hit the 2-slot ceiling immediately. Fixed: `clearPoiCaches()` now calls `it.cancel()` on each `Deferred` before clearing the map.
+
+**New: per-shard kumi.systems mirror.** `postOverpass()` now wraps `postOverpassToEndpoint()` in a two-endpoint loop: primary `overpass-api.de`, then `overpass.kumi.systems` if the primary returns HTTP 504/503/429. The mirror has its own independent slot budget and handles transient primary-endpoint exhaustion without a full retry cycle.
+
+**New: FETCHING elapsed timer.** `MainFragment` starts a 1s ticker coroutine when `TourState.FETCHING` is entered; the timer updates `tv_status` with "(Ns)" so users see progress rather than an unmoving spinner. Timer cancels automatically on state exit.
+
+**New: Retry button.** `TourState.ERROR` now shows `card_status` (with the error text) and a "Retry" button (`btn_retry_fetch`). The "Go" button and idle hint are hidden in ERROR state. Tapping Retry sends `ACTION_RETRY` to the service, resets `fetchRetryCount`, and restarts the generation cycle.
+
 ---
 
 ## OpenTripMap Integration & Migration (SUPERSEDED — removed in v3.4.4)

@@ -61,6 +61,7 @@ class TourGuideService : LifecycleService() {
     private var routeAdvanceJob: Job? = null
     private var isSpeaking = false
     private var isGenerating = false
+    private var fetchRetryCount = 0
     private var isReplayMode = false
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
@@ -131,6 +132,10 @@ class TourGuideService : LifecycleService() {
             }
             ACTION_REPLAY_POI -> handleReplayPoi(intent)
             ACTION_TOGGLE_DEEP_DIVE -> toggleDeepDive()
+            ACTION_RETRY -> {
+                fetchRetryCount = 0
+                lastLocation?.let { startGenerationCycle(it) }
+            }
         }
 
         return START_STICKY
@@ -426,6 +431,7 @@ class TourGuideService : LifecycleService() {
                 currentNarrationSummary = result.summary
                 currentNarrationWikipediaUrl = wikiUrl
                 currentPoiMeta.value = CurrentPoiMeta(poi.osmId, result.summary, wikiUrl)
+                fetchRetryCount = 0
                 isGenerating = false
                 speak(result.text, poi.name)
 
@@ -438,10 +444,19 @@ class TourGuideService : LifecycleService() {
                 // OkHttp throws IOException rather than CancellationException. Don't retry
                 // or post the error notification — the tour is stopping.
                 if (!isActive) return@launch
-                Log.e(TAG, "Error in generation cycle", e)
+                fetchRetryCount++
+                Log.e(TAG, "Error in generation cycle (attempt $fetchRetryCount/$MAX_FETCH_RETRIES)", e)
+                if (fetchRetryCount >= MAX_FETCH_RETRIES) {
+                    fetchRetryCount = 0
+                    emitError(e.message ?: "Unknown error")
+                    emitState(TourState.ERROR)
+                    updateNotification("Could not find places — tap Retry in app", false)
+                    return@launch
+                }
+                val delayMs = when (fetchRetryCount) { 1 -> 15_000L; 2 -> 30_000L; else -> 60_000L }
                 emitError(e.message ?: "Unknown error")
-                updateNotification("Error — retrying shortly...", true)
-                delay(15_000L)
+                updateNotification("Error — retry $fetchRetryCount/$MAX_FETCH_RETRIES in ${delayMs / 1000}s…", true)
+                delay(delayMs)
                 generationJob = null
                 lastLocation?.let { startGenerationCycle(it) }
             }
@@ -929,6 +944,8 @@ class TourGuideService : LifecycleService() {
         const val ACTION_SKIP = "ACTION_SKIP"
         const val ACTION_REPLAY_POI = "ACTION_REPLAY_POI"
         const val ACTION_TOGGLE_DEEP_DIVE = "ACTION_TOGGLE_DEEP_DIVE"
+        const val ACTION_RETRY = "ACTION_RETRY"
+        const val MAX_FETCH_RETRIES = 3
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val EXTRA_FAMOUS_MODE = "EXTRA_FAMOUS_MODE"

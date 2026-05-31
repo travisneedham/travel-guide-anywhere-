@@ -160,6 +160,13 @@ class MainViewModel @Inject constructor(
         getApplication<Application>().startService(intent)
     }
 
+    fun retryFetch() {
+        val intent = Intent(getApplication(), TourGuideService::class.java).apply {
+            action = TourGuideService.ACTION_RETRY
+        }
+        getApplication<Application>().startService(intent)
+    }
+
     fun pauseOrResume() {
         val action = if (tourState.value == TourState.PAUSED)
             TourGuideService.ACTION_RESUME else TourGuideService.ACTION_PAUSE
