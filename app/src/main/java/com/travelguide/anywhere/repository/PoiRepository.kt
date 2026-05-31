@@ -104,7 +104,7 @@ class PoiRepository @Inject constructor(
             radius = radiusMeters,
             lon = location.longitude,
             lat = location.latitude,
-            kinds = "interesting_places,museums,historic,architecture,stadiums,zoos,aquariums,amusements,beaches,natural,gardens",
+            kinds = "interesting_places,museums,historic,architecture,natural,amusements,beaches",
             rate = "1",
             orderby = if (famousMode) "rate" else "dist",
             limit = 100,
@@ -267,7 +267,6 @@ class PoiRepository @Inject constructor(
     private fun buildFamousQuery(lat: Double, lon: Double, radiusMeters: Int): String =
         "[out:json][timeout:45];\n" +
         "(\n" +
-        "  node[\"name\"][\"wikipedia\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"tourism\"~\"attraction|museum|zoo|theme_park|aquarium|gallery|artwork\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"heritage\"](around:$radiusMeters,$lat,$lon);\n" +
