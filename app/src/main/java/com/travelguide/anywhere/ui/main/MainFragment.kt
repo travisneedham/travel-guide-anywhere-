@@ -373,7 +373,7 @@ class MainFragment : Fragment() {
                             val t0 = System.currentTimeMillis()
                             fetchTimerJob?.cancel()
                             fetchTimerJob = lifecycleScope.launch {
-                                while (isActive) {
+                                while (true) {
                                     val elapsed = (System.currentTimeMillis() - t0) / 1000
                                     binding.tvStatus.text = "$fetchLabel (${elapsed}s)"
                                     delay(1_000L)
