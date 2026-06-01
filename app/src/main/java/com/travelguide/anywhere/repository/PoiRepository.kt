@@ -54,7 +54,8 @@ class PoiRepository @Inject constructor(
         private const val WIKI_CACHE_TTL_MS = 4L * 24 * 60 * 60 * 1000  // 4 days
         private const val PREF_WIKI_VIEWS_PREFIX = "wiki_v_"
         private const val PREF_WIKI_SLINKS_PREFIX = "wiki_s_"
-        private const val ENRICH_LIMIT = 25
+        private const val ENRICH_LIMIT = 60
+        private const val FAMOUS_SHARD_CAP = 1200  // was 300; raising the cap is free — Overpass already found the matches
 
         // Pre-warm / POI-list cache. The famous query is expensive (see ENGINEERING_NOTES); we cache
         // the fully-ranked result by coarse location so a tour started shortly after app launch is
@@ -70,10 +71,11 @@ class PoiRepository @Inject constructor(
 
         private const val OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private const val OVERPASS_MIRROR_ENDPOINT = "https://overpass.kumi.systems/api/interpreter"
-        // Per-shard server-side budget. overpass-api.de grants 2 slots per IP, so 2 shards run truly
-        // concurrently. 120s covers the slowest expected shard with headroom.
-        private const val OVERPASS_SHARD_TIMEOUT_SEC = 120
-        private const val OVERPASS_CALL_TIMEOUT_SEC = 125L  // OkHttp ceiling = server timeout + overhead
+        // Per-shard server-side budget. overpass-api.de grants 2 slots per IP so 2 shards run truly
+        // concurrently. 180s lets shardB (rare-coverage branches) finish in dense metros instead of
+        // timing out and wasting the slot; shardA is faster. OkHttp ceiling must exceed the server value.
+        private const val OVERPASS_SHARD_TIMEOUT_SEC = 180
+        private const val OVERPASS_CALL_TIMEOUT_SEC = 195L  // OkHttp ceiling = server timeout + overhead
 
         private const val GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
     }
@@ -341,7 +343,7 @@ class PoiRepository @Inject constructor(
         val a = "around:$radiusMeters,$lat,$lon"
         fun shard(vararg branches: String): String =
             "[out:json][timeout:$OVERPASS_SHARD_TIMEOUT_SEC];\n(\n" +
-                branches.joinToString("\n") + "\n);\nout body center 300;"
+                branches.joinToString("\n") + "\n);\nout body center $FAMOUS_SHARD_CAP;"
 
         val shardA = shard(
             // node-only wikipedia catch-all + way-inclusive building/man_made closes the area gap

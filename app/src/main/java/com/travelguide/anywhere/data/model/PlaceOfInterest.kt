@@ -31,13 +31,17 @@ data class PlaceOfInterest(
         if (tags.containsKey("image")) score += 20
         if (tags["historic"] in setOf("castle", "archaeological_site")) score += 50
         val views = tags["wiki_views"]?.toLongOrNull() ?: 0L
-        if (views > 0L) score += (views.toDouble().pow(0.57) * 8.06).toInt()
+        val viewsContribution = if (views > 0L) (views.toDouble().pow(0.57) * 8.06).toInt() else 0
+        // Infrastructure/agency types (transit, telecom, etc.) get half credit for pageviews —
+        // they're notable but not visitable landmarks.
+        score += if (type == PoiType.OTHER) viewsContribution / 2 else viewsContribution
+        // Cap sitelinks: mis-tagged Wikidata QIDs can carry 20+ sitelinks for a different entity.
         val sitelinks = tags["wiki_sitelinks"]?.toIntOrNull() ?: 0
-        score += sitelinks * 35
-        // Fallback for places not yet enriched: use tag presence as a weak signal
+        score += minOf(sitelinks, 15) * 20
+        // Fallback for un-enriched POIs: weak signal so real typed POIs rank above infrastructure.
         if (views == 0L && sitelinks == 0) {
-            if (tags.containsKey("wikipedia")) score += 500
-            else if (tags.containsKey("wikidata")) score += 150
+            if (tags.containsKey("wikipedia")) score += 120
+            else if (tags.containsKey("wikidata")) score += 40
         }
         return score
     }
@@ -71,5 +75,5 @@ enum class PoiType(val displayName: String, val interestScore: Int) {
     VIEWPOINT("Viewpoint", 70),
     PLACE_OF_WORSHIP("Place of Worship", 60),
     PARK("Park", 50),
-    OTHER("Point of Interest", 30);
+    OTHER("Point of Interest", 10);
 }
