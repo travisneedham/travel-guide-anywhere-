@@ -62,6 +62,7 @@ class TourGuideService : LifecycleService() {
     private var isSpeaking = false
     private var isGenerating = false
     private var fetchRetryCount = 0
+    private val sessionOperators = mutableSetOf<String>()
     private var isReplayMode = false
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
@@ -391,8 +392,13 @@ class TourGuideService : LifecycleService() {
                 updateNotification(fetchMsg, true)
 
                 val allPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
-                val pois = allPois.filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
-                Log.d(TAG, "fetchPois: ${allPois.size} total, ${pois.size} unmentioned")
+                val pois = allPois
+                    .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
+                    .filterNot { poi ->
+                        val op = poi.tags["operator"]?.trim()
+                        !op.isNullOrBlank() && op in sessionOperators
+                    }
+                Log.d(TAG, "fetchPois: ${allPois.size} total, ${pois.size} unmentioned/unvisited-venue")
 
                 if (pois.isEmpty()) {
                     emitState(TourState.NO_NEW_POIS)
@@ -413,6 +419,7 @@ class TourGuideService : LifecycleService() {
                 updateNotification("Writing your tour narration...", true)
 
                 mentionedPlacesStore.sessionNames.add(poi.name)
+                poi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
                 currentNarrationWikipediaUrl = null
@@ -645,6 +652,7 @@ class TourGuideService : LifecycleService() {
                         !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
                         Log.i(TAG, "PREFETCH HIT: using prefetched narration for '${nextPoi.name}'")
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
+                        nextPoi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
                         currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
                         currentNarrationSummary = nextSummary
@@ -777,6 +785,7 @@ class TourGuideService : LifecycleService() {
         if (nextPoi != null && nextNarration != null &&
             !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
             mentionedPlacesStore.sessionNames.add(nextPoi.name)
+            nextPoi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
             currentNarrationCommit = nextCommit
             currentNarrationPoi = nextPoi
             currentNarrationSummary = nextSummary
@@ -817,6 +826,7 @@ class TourGuideService : LifecycleService() {
         ttsEngine?.stop()
         isSpeaking = false
         isGenerating = false
+        sessionOperators.clear()
         savedTopicName = ""
         loadingProgress.value = -1f
         emitCurrentTopic("")

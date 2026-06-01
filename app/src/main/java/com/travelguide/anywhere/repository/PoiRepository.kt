@@ -138,6 +138,16 @@ class PoiRepository @Inject constructor(
         // 0b. Serve a fresh persistent-cache hit (distances recomputed for the real location).
         cachedPois(key)?.let { cached ->
             Log.d(TAG, "[fetchPois] cache HIT for $key (${cached.size} POIs)")
+            if (famousMode) {
+                Log.d(TAG, "[cache/fame] Top 50 (from cache):")
+                cached.take(50).forEachIndexed { i, p ->
+                    Log.d(TAG, "  #${i + 1} ${p.name} — fame=${p.fameScore} " +
+                        "views=${p.tags["wiki_views"] ?: "-"} " +
+                        "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} " +
+                        "operator=${p.tags["operator"] ?: "-"} type=${p.type} " +
+                        "dist=${"%.1f".format(p.distanceMiles)}mi")
+                }
+            }
             return@withContext rerankForLocation(cached, location, famousMode)
         }
 
@@ -170,11 +180,12 @@ class PoiRepository @Inject constructor(
 
         if (sorted.isNotEmpty()) {
             val label = if (famousMode) "fame" else "dist"
-            Log.d(TAG, "[$source/$label] ${sorted.size} POIs ranked. Top 10:")
-            sorted.take(10).forEachIndexed { i, p ->
+            Log.d(TAG, "[$source/$label] ${sorted.size} POIs ranked. Top 50:")
+            sorted.take(50).forEachIndexed { i, p ->
                 Log.d(TAG, "  #${i + 1} ${p.name} — fame=${p.fameScore} " +
                     "views=${p.tags["wiki_views"] ?: "-"} " +
-                    "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} type=${p.type} " +
+                    "sitelinks=${p.tags["wiki_sitelinks"] ?: "-"} " +
+                    "operator=${p.tags["operator"] ?: "-"} type=${p.type} " +
                     "dist=${"%.1f".format(p.distanceMiles)}mi")
             }
             cachePois(cacheKey, sorted)
