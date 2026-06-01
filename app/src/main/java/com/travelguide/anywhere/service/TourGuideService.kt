@@ -63,6 +63,7 @@ class TourGuideService : LifecycleService() {
     private var isGenerating = false
     private var fetchRetryCount = 0
     private val sessionOperators = mutableSetOf<String>()
+    private val recentCategories = ArrayDeque<PoiType>()
     private var isReplayMode = false
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
@@ -420,6 +421,7 @@ class TourGuideService : LifecycleService() {
 
                 mentionedPlacesStore.sessionNames.add(poi.name)
                 poi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
+                recordCategory(poi.type)
                 currentNarrationPoi = poi
                 currentNarrationSummary = ""
                 currentNarrationWikipediaUrl = null
@@ -470,10 +472,22 @@ class TourGuideService : LifecycleService() {
         }
     }
 
+    private fun orderByDiversity(candidates: List<PlaceOfInterest>): List<PlaceOfInterest> {
+        if (recentCategories.isEmpty()) return candidates
+        val recent = recentCategories.toSet()
+        val (stale, fresh) = candidates.partition { it.type in recent }
+        return fresh + stale
+    }
+
+    private fun recordCategory(type: PoiType) {
+        recentCategories.addLast(type)
+        while (recentCategories.size > DIVERSITY_WINDOW) recentCategories.removeFirst()
+    }
+
     private suspend fun selectPoi(candidates: List<PlaceOfInterest>): PlaceOfInterest? {
         val disliked = mentionedPlacesStore.thumbsDownEntries()
         var skipped = 0
-        for (candidate in candidates) {
+        for (candidate in orderByDiversity(candidates)) {
             if (disliked.isNotEmpty() && skipped < 5) {
                 val desc = "${candidate.name} — ${candidate.shortDescription}"
                 val similar = narrationRepository.isSimilarToDisliked(
@@ -510,7 +524,7 @@ class TourGuideService : LifecycleService() {
                     Log.d(TAG, "PREFETCH: no unmentioned POIs — aborting")
                     return@launch
                 }
-                val poi = pois.first()
+                val poi = orderByDiversity(pois).first()
                 Log.d(TAG, "PREFETCH: generating narration for '${poi.name}'")
                 val t1 = System.currentTimeMillis()
                 val result = narrationRepository.generateNarration(listOf(poi), location, radiusMiles)
@@ -653,6 +667,7 @@ class TourGuideService : LifecycleService() {
                         Log.i(TAG, "PREFETCH HIT: using prefetched narration for '${nextPoi.name}'")
                         mentionedPlacesStore.sessionNames.add(nextPoi.name)
                         nextPoi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
+                        recordCategory(nextPoi.type)
                         currentNarrationCommit = nextCommit
                         currentNarrationPoi = nextPoi
                         currentNarrationSummary = nextSummary
@@ -786,6 +801,7 @@ class TourGuideService : LifecycleService() {
             !mentionedPlacesStore.isNameMentioned(nextPoi.name)) {
             mentionedPlacesStore.sessionNames.add(nextPoi.name)
             nextPoi.tags["operator"]?.takeIf { it.isNotBlank() }?.let { sessionOperators.add(it) }
+            recordCategory(nextPoi.type)
             currentNarrationCommit = nextCommit
             currentNarrationPoi = nextPoi
             currentNarrationSummary = nextSummary
@@ -827,6 +843,7 @@ class TourGuideService : LifecycleService() {
         isSpeaking = false
         isGenerating = false
         sessionOperators.clear()
+        recentCategories.clear()
         savedTopicName = ""
         loadingProgress.value = -1f
         emitCurrentTopic("")
@@ -956,6 +973,7 @@ class TourGuideService : LifecycleService() {
         const val ACTION_TOGGLE_DEEP_DIVE = "ACTION_TOGGLE_DEEP_DIVE"
         const val ACTION_RETRY = "ACTION_RETRY"
         const val MAX_FETCH_RETRIES = 3
+        private const val DIVERSITY_WINDOW = 2  // don't repeat a PoiType within this many picks
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
         const val EXTRA_API_KEY = "EXTRA_API_KEY"
         const val EXTRA_FAMOUS_MODE = "EXTRA_FAMOUS_MODE"
