@@ -191,6 +191,66 @@
                     android:checked="true" />
 
                 <CheckBox
+                    android:id="@+id/cb_filter_sub_stadium"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Stadiums &amp; Arenas"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_sub_ride"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Rides &amp; Coasters"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_sub_zoo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Zoos &amp; Aquariums"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_sub_theme_park"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Theme Parks"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_sub_garden"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Gardens &amp; Nature Reserves"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
+                    android:id="@+id/cb_filter_sub_tower"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:text="Towers &amp; Landmarks"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent"
+                    android:checked="true" />
+
+                <CheckBox
                     android:id="@+id/cb_filter_artwork"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -1374,6 +1434,40 @@
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp"
                     android:text="Wipes saved place lists and Wikipedia data so the next tour fetches fresh."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_export_session_history"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Export Session History" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Exports all places narrated this session in chronological order with timestamps."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_export_ranked_pois"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Export Ranked POI List" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Exports the full background-ranked list from the most recent fetch — use to audit the ranking algorithm."
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
 

@@ -565,10 +565,25 @@ class SettingsFragment : Fragment() {
         binding.cbFilterHistoric.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_HISTORIC, true)
         binding.cbFilterMuseum.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_MUSEUM, true)
         binding.cbFilterAttraction.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ATTRACTION, true)
+        binding.cbFilterSubStadium.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_STADIUM, true)
+        binding.cbFilterSubRide.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_RIDE, true)
+        binding.cbFilterSubZoo.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_ZOO, true)
+        binding.cbFilterSubThemePark.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_THEME_PARK, true)
+        binding.cbFilterSubGarden.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_GARDEN, true)
+        binding.cbFilterSubTower.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_SUB_TOWER, true)
         binding.cbFilterArtwork.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_ARTWORK, true)
         binding.cbFilterViewpoint.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_VIEWPOINT, true)
         binding.cbFilterPark.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PARK, true)
         binding.cbFilterPlaceOfWorship.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, true)
+
+        val subCheckboxes = listOf(
+            binding.cbFilterSubStadium, binding.cbFilterSubRide, binding.cbFilterSubZoo,
+            binding.cbFilterSubThemePark, binding.cbFilterSubGarden, binding.cbFilterSubTower
+        )
+        subCheckboxes.forEach { it.isEnabled = binding.cbFilterAttraction.isChecked }
+        binding.cbFilterAttraction.setOnCheckedChangeListener { _, isChecked ->
+            subCheckboxes.forEach { it.isEnabled = isChecked }
+        }
     }
 
     private fun loadPrompts() {
@@ -732,6 +747,107 @@ class SettingsFragment : Fragment() {
         binding.btnClearPoiCache.setOnClickListener {
             poiRepository.clearPoiCaches()
             Toast.makeText(requireContext(), "Cached places cleared", Toast.LENGTH_SHORT).show()
+        }
+        binding.btnExportSessionHistory.setOnClickListener {
+            lifecycleScope.launch {
+                val entries = withContext(Dispatchers.IO) { mentionedPlacesStore.allSorted().sortedBy { it.mentionedAt } }
+                if (entries.isEmpty()) {
+                    Toast.makeText(requireContext(), "No session history yet — run a tour first.", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val ctx = requireContext()
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                data class SaveResult(val displayPath: String, val uri: Uri)
+                val saved = withContext(Dispatchers.IO) {
+                    val sb = StringBuilder("timestamp\tname\ttype\tdiversityKey\tosmId\tlat\tlon\tthumbsDown\tautoSkipped\twantToVisit\n")
+                    entries.forEach { e ->
+                        val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(e.mentionedAt))
+                        val type = e.tags["_poiType"] ?: ""
+                        val dkey = e.tags["_diversityKey"] ?: ""
+                        sb.append("$time\t${e.name}\t$type\t$dkey\t${e.osmId}\t${e.lat}\t${e.lon}\t${e.thumbsDown}\t${e.autoSkipped}\t${e.wantToVisit}\n")
+                    }
+                    val content = sb.toString()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val resolver = ctx.contentResolver
+                        val cv = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, "session_history_$ts.tsv")
+                            put(MediaStore.Downloads.MIME_TYPE, "text/tab-separated-values")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                        resolver.openOutputStream(uri)!!.use { it.write(content.toByteArray()) }
+                        cv.clear(); cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        resolver.update(uri, cv, null, null)
+                        SaveResult("Downloads/session_history_$ts.tsv", uri)
+                    } else {
+                        val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
+                        outDir.mkdirs()
+                        val f = File(outDir, "session_history_$ts.tsv").also { it.writeText(content) }
+                        SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
+                    }
+                }
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Session History Saved")
+                    .setMessage("${entries.size} places • ${saved.displayPath}")
+                    .setPositiveButton("Share File") { _, _ ->
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, saved.uri)
+                            putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Session History $ts")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }, "Share Session History"))
+                    }
+                    .setNegativeButton("Done", null).show()
+            }
+        }
+        binding.btnExportRankedPois.setOnClickListener {
+            lifecycleScope.launch {
+                val pois = withContext(Dispatchers.IO) { poiRepository.mostRecentCachedPois() }
+                if (pois == null) {
+                    Toast.makeText(requireContext(), "No cached POI list — run a tour first.", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val ctx = requireContext()
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                data class SaveResult(val displayPath: String, val uri: Uri)
+                val saved = withContext(Dispatchers.IO) {
+                    val sb = StringBuilder("rank\tname\ttype\tdiversityKey\tfameScore\twiki_views\twiki_sitelinks\tlat\tlon\tosmId\n")
+                    pois.sortedByDescending { it.fameScore }.forEachIndexed { i, p ->
+                        sb.append("${i + 1}\t${p.name}\t${p.type}\t${p.diversityKey}\t${p.fameScore}\t${p.tags["wiki_views"] ?: ""}\t${p.tags["wiki_sitelinks"] ?: ""}\t${p.lat}\t${p.lon}\t${p.osmId}\n")
+                    }
+                    val content = sb.toString()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val resolver = ctx.contentResolver
+                        val cv = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, "ranked_pois_$ts.tsv")
+                            put(MediaStore.Downloads.MIME_TYPE, "text/tab-separated-values")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                        resolver.openOutputStream(uri)!!.use { it.write(content.toByteArray()) }
+                        cv.clear(); cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        resolver.update(uri, cv, null, null)
+                        SaveResult("Downloads/ranked_pois_$ts.tsv", uri)
+                    } else {
+                        val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
+                        outDir.mkdirs()
+                        val f = File(outDir, "ranked_pois_$ts.tsv").also { it.writeText(content) }
+                        SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
+                    }
+                }
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Ranked POI List Saved")
+                    .setMessage("${pois.size} POIs • ${saved.displayPath}")
+                    .setPositiveButton("Share File") { _, _ ->
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, saved.uri)
+                            putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Ranked POIs $ts")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }, "Share Ranked POI List"))
+                    }
+                    .setNegativeButton("Done", null).show()
+            }
         }
         binding.btnCopyLogs.setOnClickListener {
             lifecycleScope.launch {
@@ -933,6 +1049,12 @@ class SettingsFragment : Fragment() {
             .putBoolean(PoiRepository.PREF_FILTER_HISTORIC, binding.cbFilterHistoric.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_MUSEUM, binding.cbFilterMuseum.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_ATTRACTION, binding.cbFilterAttraction.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_STADIUM, binding.cbFilterSubStadium.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_RIDE, binding.cbFilterSubRide.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_ZOO, binding.cbFilterSubZoo.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_THEME_PARK, binding.cbFilterSubThemePark.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_GARDEN, binding.cbFilterSubGarden.isChecked)
+            .putBoolean(PoiRepository.PREF_FILTER_SUB_TOWER, binding.cbFilterSubTower.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_ARTWORK, binding.cbFilterArtwork.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_VIEWPOINT, binding.cbFilterViewpoint.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_PARK, binding.cbFilterPark.isChecked)

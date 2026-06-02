@@ -46,6 +46,19 @@ data class PlaceOfInterest(
         return score
     }
 
+    val diversityKey: String get() = when {
+        tags["leisure"] == "stadium"                               -> "stadium"
+        tags.containsKey("attraction")                             -> "ride"
+        tags["tourism"] == "zoo"                                   -> "zoo"
+        tags["tourism"] == "aquarium"                              -> "aquarium"
+        tags["tourism"] == "theme_park"                            -> "theme_park"
+        tags["leisure"] in setOf("garden", "nature_reserve")      -> "garden"
+        tags["man_made"] in setOf("tower", "obelisk", "lighthouse") -> "tower"
+        tags["man_made"] == "bridge"                               -> "bridge"
+        tags.containsKey("aerialway")                              -> "aerialway"
+        else                                                       -> type.name
+    }
+
     val shortDescription: String get() {
         val historic = tags["historic"]
         val tourism = tags["tourism"]

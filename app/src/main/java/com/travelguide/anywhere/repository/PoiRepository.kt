@@ -46,6 +46,13 @@ class PoiRepository @Inject constructor(
         const val PREF_FILTER_PARK             = "filter_park"
         const val PREF_FILTER_PLACE_OF_WORSHIP = "filter_place_of_worship"
 
+        const val PREF_FILTER_SUB_STADIUM    = "filter_sub_stadium"
+        const val PREF_FILTER_SUB_RIDE       = "filter_sub_ride"
+        const val PREF_FILTER_SUB_ZOO        = "filter_sub_zoo"
+        const val PREF_FILTER_SUB_THEME_PARK = "filter_sub_theme_park"
+        const val PREF_FILTER_SUB_GARDEN     = "filter_sub_garden"
+        const val PREF_FILTER_SUB_TOWER      = "filter_sub_tower"
+
         private val ADMIN_PLACE_TYPES = setOf(
             "city", "town", "village", "hamlet", "suburb", "neighbourhood",
             "county", "state", "country", "region", "district", "municipality", "borough"
@@ -244,7 +251,7 @@ class PoiRepository @Inject constructor(
             }
             .distinctBy { it.osmId }  // merge overlap between shards before mapping
             .map { element -> element.toPlaceOfInterest(location) }
-            .filter { poi -> isTypeEnabled(poi.type) }
+            .filter { poi -> isTypeEnabled(poi.type) && isSubCategoryEnabled(poi) }
             .distinctBy { it.name }
             .sortedByDescending { it.fameScore }  // pre-sort so ENRICH_LIMIT targets most promising
 
@@ -304,6 +311,19 @@ class PoiRepository @Inject constructor(
         PoiType.PARK             -> prefs.getBoolean(PREF_FILTER_PARK, true)
         PoiType.PLACE_OF_WORSHIP -> prefs.getBoolean(PREF_FILTER_PLACE_OF_WORSHIP, true)
         PoiType.OTHER            -> true
+    }
+
+    private fun isSubCategoryEnabled(poi: PlaceOfInterest): Boolean {
+        if (poi.type != PoiType.ATTRACTION) return true
+        return when (poi.diversityKey) {
+            "stadium"              -> prefs.getBoolean(PREF_FILTER_SUB_STADIUM, true)
+            "ride"                 -> prefs.getBoolean(PREF_FILTER_SUB_RIDE, true)
+            "zoo", "aquarium"      -> prefs.getBoolean(PREF_FILTER_SUB_ZOO, true)
+            "theme_park"           -> prefs.getBoolean(PREF_FILTER_SUB_THEME_PARK, true)
+            "garden"               -> prefs.getBoolean(PREF_FILTER_SUB_GARDEN, true)
+            "tower", "bridge", "aerialway" -> prefs.getBoolean(PREF_FILTER_SUB_TOWER, true)
+            else                   -> true
+        }
     }
 
     private fun buildNearbyQuery(lat: Double, lon: Double, radiusMeters: Int): String {
@@ -413,6 +433,7 @@ class PoiRepository @Inject constructor(
         tags["landuse"] == "cemetery" -> PoiType.HISTORIC
         tags["man_made"] == "bridge" -> PoiType.ATTRACTION
         tags["aerialway"] != null -> PoiType.ATTRACTION
+        tags.containsKey("heritage") -> PoiType.HISTORIC
         else -> PoiType.OTHER
     }
 
@@ -585,6 +606,19 @@ class PoiRepository @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "[cache] write failed for $key: ${e.message}")
         }
+    }
+
+    /** Returns the most recently cached ranked POI list across all locations/modes, or null if nothing cached. */
+    fun mostRecentCachedPois(): List<PlaceOfInterest>? {
+        val envelopeType = object : TypeToken<PoiCacheEnvelope>() {}.type
+        return prefs.all
+            .filterKeys { it.startsWith(PREF_POI_CACHE_PREFIX) }
+            .mapNotNull { (_, v) ->
+                try { gson.fromJson<PoiCacheEnvelope>(v as? String ?: return@mapNotNull null, envelopeType) }
+                catch (e: Exception) { null }
+            }
+            .maxByOrNull { it.ts }
+            ?.pois
     }
 
     /**
