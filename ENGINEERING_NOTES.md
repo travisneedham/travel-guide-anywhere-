@@ -812,6 +812,94 @@ Then tell Claude the path. Claude can then read the file and generate the adapti
 
 ---
 
+## Famous-Mode POI Ranking & Diversity Algorithm (Phase 1 checkpoint — v3.5.x)
+
+This is the state of the famous-mode ranking pipeline at the close of Phase 1. It is working
+well: in DFW it surfaces the real headliners (AT&T Stadium, Reunion Tower, Sixth Floor Museum,
+the major museums) in a sensible order, then interleaves categories so the listener doesn't get
+four stadiums back-to-back. Small bugs remain (tracked separately), but the core approach below
+is the one we want to keep building on.
+
+### The pipeline, end to end (`PoiRepository.kt` + `TourGuideService.kt`)
+
+1. **Fetch (2 parallel Overpass shards).** `buildFamousQueryShards` runs shardA (high-yield:
+   tourism/historic/heritage/building/man_made/stadium) and shardB (rare: square/garden/beach/
+   peak/cemetery) concurrently under `supervisorScope`, so a slow/failed shard doesn't sink the
+   other. Per-shard timeout `OVERPASS_SHARD_TIMEOUT_SEC = 180`, OkHttp ceiling
+   `OVERPASS_CALL_TIMEOUT_SEC = 195`. On 504/503/429 each shard retries on the kumi.systems mirror.
+2. **Don't cap away the headliners.** Each shard ends with `out body center $FAMOUS_SHARD_CAP`
+   where `FAMOUS_SHARD_CAP = 1200` (was 300). `out`'s count is an *output* limit, not a *find*
+   limit — Overpass already located the matches, so raising it is free and was the single most
+   important coverage fix (296 → ~1163 POIs in DFW; the 300-cap was silently discarding
+   Reunion Tower / Perot / Kimbell / AT&T in arbitrary type/id order).
+3. **Type resolution** (`resolveType`). Maps OSM tags → `PoiType`. Order matters (first match
+   wins). Notably: stadiums, theme parks, zoos, aquariums, marketplaces, squares, bridges, and
+   aerialways all resolve to `ATTRACTION`; gardens/beaches/nature_reserves → `PARK`;
+   cemeteries → `HISTORIC`. **Last-resort catch:** `heritage`-tagged buildings with no `historic`
+   tag fall to `HISTORIC` (was `OTHER`) so NRHP buildings join the historic rotation instead of
+   languishing as misc.
+4. **Enrichment (the continuous signal).** Pre-sort candidates by un-enriched `fameScore`, take
+   the top `ENRICH_LIMIT = 60`, and fetch **Wikipedia pageviews** (`wiki_views`) + **Wikidata
+   sitelinks** (`wiki_sitelinks`) for them in parallel (4-day cached). Pre-sorting means the 60
+   enrichment slots target the most promising POIs rather than an arbitrary 60.
+5. **Rank.** `enriched.sortedByDescending { it.fameScore }` for famous mode (nearby mode sorts by
+   `distanceMeters` instead). Result cached in SharedPreferences as a `PoiCacheEnvelope`, keyed by
+   geohash(precision 4 ≈ 20-40 km cell) + radius + mode, TTL 6 h.
+
+### `fameScore` formula (`PlaceOfInterest.kt`)
+
+Starts from `type.interestScore` and adds signal-weighted bonuses. The design principle: real,
+visitable, well-documented landmarks should beat infrastructure/agencies and mis-tagged map-dots.
+
+- **Base by type:** HISTORIC 100, MUSEUM 90, ATTRACTION 80, ARTWORK/VIEWPOINT 70,
+  PLACE_OF_WORSHIP 60, PARK 50, **OTHER 10** (deliberately far below real types so agencies/
+  stations/companies that match the wikipedia catch-all sink).
+- **Heritage tier:** `heritage=1` +1000, `=2` +400, `=3` +200 (strongest single signal — these
+  are formally recognized landmarks).
+- **Tag signals:** tourism=attraction +100, tourism=museum +75, wikimedia_commons +40, fee=yes
+  +35, opening_hours +25, image +20, historic∈{castle, archaeological_site} +50.
+- **Pageviews (primary continuous signal):** `views^0.57 * 8.06`, a power curve that rewards fame
+  without letting a megahit run away linearly. **OTHER types get half credit** — they're notable
+  (a transit agency has pageviews) but aren't places you visit.
+- **Sitelinks (secondary signal):** `min(sitelinks, 15) * 20`. **Capped** because a mis-tagged
+  Wikidata QID can carry 20+ sitelinks for an unrelated entity (the "Draper" bug — an
+  unincorporated map-dot that bought a top-5 slot off 27 sitelinks). Real landmarks rarely exceed
+  ~15, so the cap costs headliners nothing.
+- **Fallback for un-enriched POIs** (no views, no sitelinks): wikipedia tag +120, else wikidata
+  tag +40. Kept deliberately *weak* (was a flat +500, which created a whole "530 club" of bus
+  stops and telecom HQs outranking enriched museums).
+
+### Category diversity / interleaving (`TourGuideService.kt`)
+
+Ranking alone produced monotonous runs (DFW's top 10 is stadium-heavy, so the tour opened with
+four stadiums). Two-level diversity fixes the *listening order* without disturbing the *ranking*:
+
+- **`diversityKey`** (on `PlaceOfInterest`) splits the broad `ATTRACTION` type into finer keys —
+  `stadium`, `ride` (coasters), `zoo`, `aquarium`, `theme_park`, `garden`, `tower`, `bridge`,
+  `aerialway` — and falls back to `type.name` for everything else. Bonus: all Six Flags coasters
+  share key `ride`, so the window also de-clusters them.
+- **`recentCategories`** is an `ArrayDeque<String>` of the last `DIVERSITY_WINDOW = 3` narrated
+  keys. `orderByDiversity` stably partitions candidates into "key used recently" vs "fresh" and
+  floats fresh ones to the front — **fame order is preserved within each half**, so we still pick
+  the most-famous item of an *unused* category. Empty history → unchanged, so the very first pick
+  is always the #1 headliner.
+- Applied at both selection sites (`selectPoi` main cycle and `prefetchNextNarration` look-ahead)
+  and recorded at all three commit sites, so history advances exactly once per narrated POI
+  regardless of which path delivered it. When keys run low late in a tour it gracefully falls back
+  to pure fame order (no starvation).
+
+### Why it works / what to preserve
+
+- The **output cap, not the query, was the coverage bottleneck** — remember this before adding
+  query branches to "find more."
+- Ranking and ordering are **separate concerns**: `fameScore` decides *who's worthy*,
+  `diversityKey` + the window decide *what order you hear them in*. Don't fold diversity into the
+  score — it would corrupt the audit-able ranking the export feature exposes.
+- The fame formula is tuned against **real DFW log data** (see the v3.4.8 before/after table in the
+  plan history). Re-tune against logs, not intuition.
+
+---
+
 ## Toolchain Compatibility (do not change without re-reading CLAUDE.md)
 
 Current working combo (as of v3.2.8):
