@@ -26,6 +26,7 @@ import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.remote.ClaudeApiService
 import com.travelguide.anywhere.databinding.FragmentSettingsBinding
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
+import com.travelguide.anywhere.data.local.SkippedEnrichmentStore
 import com.travelguide.anywhere.repository.NarrationRepository
 import com.travelguide.anywhere.repository.PoiRepository
 import com.travelguide.anywhere.service.KokoroDownloadService
@@ -66,6 +67,7 @@ class SettingsFragment : Fragment() {
     @Inject lateinit var narrationRepository: NarrationRepository
     @Inject lateinit var localLlmModelManager: LocalLlmModelManager
     @Inject lateinit var poiRepository: PoiRepository
+    @Inject lateinit var skippedEnrichmentStore: SkippedEnrichmentStore
 
     private val viewModel: MainViewModel by activityViewModels()
 
@@ -723,22 +725,18 @@ class SettingsFragment : Fragment() {
 
         binding.btnClearHistory.setOnClickListener {
             MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Clear History?")
+                .setTitle("Clear Memory?")
                 .setMessage(
-                    "This removes all places from your \"Places Covered\" list and clears " +
-                    "narration memory so Claude won't repeat context from previous tours. " +
-                    "Everything will be eligible to be narrated again on your next tour."
+                    "Clears places covered, narration memory, the POI cache, and the " +
+                    "skipped-enrichment log. Everything will be eligible to be narrated " +
+                    "again on your next tour."
                 )
                 .setPositiveButton("Clear") { _, _ ->
                     viewModel.clearHistory()
-                    Toast.makeText(requireContext(), "History cleared", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Memory cleared", Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
-        }
-        binding.btnClearPoiCache.setOnClickListener {
-            poiRepository.clearPoiCaches()
-            Toast.makeText(requireContext(), "Cached places cleared", Toast.LENGTH_SHORT).show()
         }
         binding.btnExportSessionHistory.setOnClickListener {
             lifecycleScope.launch {
@@ -837,6 +835,55 @@ class SettingsFragment : Fragment() {
                             putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Ranked POIs $ts")
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }, "Share Ranked POI List"))
+                    }
+                    .setNegativeButton("Done", null).show()
+            }
+        }
+        binding.btnExportSkippedEnrichments.setOnClickListener {
+            lifecycleScope.launch {
+                val entries = withContext(Dispatchers.IO) { skippedEnrichmentStore.allSorted() }
+                if (entries.isEmpty()) {
+                    Toast.makeText(requireContext(), "No skipped enrichments logged yet.", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val ctx = requireContext()
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                data class SaveResult(val displayPath: String, val uri: Uri)
+                val saved = withContext(Dispatchers.IO) {
+                    val sb = StringBuilder("timestamp\tsource\treason\tpoiName\tresolvedTitle\tqid\tosmId\n")
+                    entries.forEach { e ->
+                        sb.append("${e.skippedAt}\t${e.source}\t${e.reason}\t${e.poiName}\t${e.resolvedTitle}\t${e.qid ?: ""}\t${e.osmId}\n")
+                    }
+                    val content = sb.toString()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val resolver = ctx.contentResolver
+                        val cv = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, "skipped_enrichments_$ts.tsv")
+                            put(MediaStore.Downloads.MIME_TYPE, "text/tab-separated-values")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                        resolver.openOutputStream(uri)!!.use { it.write(content.toByteArray()) }
+                        cv.clear(); cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        resolver.update(uri, cv, null, null)
+                        SaveResult("Downloads/skipped_enrichments_$ts.tsv", uri)
+                    } else {
+                        val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
+                        outDir.mkdirs()
+                        val f = File(outDir, "skipped_enrichments_$ts.tsv").also { it.writeText(content) }
+                        SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
+                    }
+                }
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Skipped Enrichments Saved")
+                    .setMessage("${entries.size} entries • ${saved.displayPath}")
+                    .setPositiveButton("Share File") { _, _ ->
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, saved.uri)
+                            putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Skipped Enrichments $ts")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }, "Share Skipped Enrichments"))
                     }
                     .setNegativeButton("Done", null).show()
             }

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.travelguide.anywhere.data.local.MentionedPlacesStore
 import com.travelguide.anywhere.data.local.NarrationHistoryStore
+import com.travelguide.anywhere.data.local.SkippedEnrichmentStore
 import com.travelguide.anywhere.data.model.LocationResult
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.RouteData
@@ -32,6 +33,7 @@ class MainViewModel @Inject constructor(
     application: Application,
     private val mentionedPlacesStore: MentionedPlacesStore,
     private val narrationHistoryStore: NarrationHistoryStore,
+    private val skippedEnrichmentStore: SkippedEnrichmentStore,
     private val routeRepository: RouteRepository,
     private val poiRepository: PoiRepository,
     private val fusedLocation: FusedLocationProviderClient,
@@ -202,6 +204,8 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             mentionedPlacesStore.clear()
             narrationHistoryStore.clear()
+            skippedEnrichmentStore.clear()
+            poiRepository.clearPoiCaches()
             TourGuideService.mentionedPlaces.value = emptyList()
         }
     }

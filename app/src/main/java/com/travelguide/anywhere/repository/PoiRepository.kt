@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.travelguide.anywhere.data.local.SkippedEnrichmentStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import com.travelguide.anywhere.data.model.PoiType
 import com.travelguide.anywhere.data.remote.dto.OverpassElement
@@ -34,6 +35,7 @@ class PoiRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val gson: Gson,
     private val prefs: SharedPreferences,
+    private val skippedEnrichmentStore: SkippedEnrichmentStore,
 ) {
     companion object {
         private const val TAG = "PoiRepository"
@@ -439,6 +441,11 @@ class PoiRepository @Inject constructor(
 
     // ── Wiki Enrichment ──────────────────────────────────────────────────────
 
+    private fun wordsOverlap(poiName: String, wikiTitle: String): Boolean {
+        val aWords = poiName.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.toSet()
+        return wikiTitle.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.any { it in aWords }
+    }
+
     private suspend fun enrichWithWikiData(pois: List<PlaceOfInterest>): List<PlaceOfInterest> =
         coroutineScope {
         if (pois.isEmpty()) return@coroutineScope pois
@@ -451,15 +458,26 @@ class PoiRepository @Inject constructor(
                 val qid = poi.tags["wikidata"]
                 val sitelinkResult = qid?.let { sitelinkMap[it] }
                 val sitelinks = sitelinkResult?.sitelinkCount ?: 0
-                val wikiTitle = poi.tags["wikipedia"]?.let { tag ->
+                val rawTitle = poi.tags["wikipedia"]?.let { tag ->
                     val colon = tag.indexOf(':')
                     if (colon >= 0) tag.substring(colon + 1).trim() else null
                 } ?: sitelinkResult?.enwikiTitle
+                val wikiTitle = if (rawTitle != null) {
+                    val generic = rawTitle.lowercase().trim() in PoiImageRepository.GENERIC_WIKIPEDIA_TITLES
+                    val matched = wordsOverlap(poi.name, rawTitle)
+                    if (generic || !matched) {
+                        val reason = if (generic) "denylist" else "name_mismatch"
+                        Log.d(TAG, "${poi.name}: wikidata(${qid}) enrich skipped — $reason '$rawTitle'")
+                        skippedEnrichmentStore.record("enrich", poi.name, poi.osmId, qid, rawTitle, reason)
+                        null
+                    } else rawTitle
+                } else null
+                val enrichedSitelinks = if (wikiTitle != null) sitelinks else 0
                 val views = if (wikiTitle != null) fetchPageviews(qid ?: wikiTitle, wikiTitle) else 0L
-                if (sitelinks == 0 && views == 0L) poi
+                if (enrichedSitelinks == 0 && views == 0L) poi
                 else poi.copy(tags = poi.tags + buildMap {
                     if (views > 0L) put("wiki_views", views.toString())
-                    if (sitelinks > 0) put("wiki_sitelinks", sitelinks.toString())
+                    if (enrichedSitelinks > 0) put("wiki_sitelinks", enrichedSitelinks.toString())
                 })
             }
         }.awaitAll()

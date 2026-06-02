@@ -104,7 +104,7 @@
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Clear Places Covered"
+                    android:text="Clear Memory Now"
                     android:textColor="@color/stop_color" />
 
 
@@ -1386,23 +1386,6 @@
                 android:visibility="gone">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_clear_poi_cache"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Clear Cached Places" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="12dp"
-                    android:text="Wipes saved place lists and Wikipedia data so the next tour fetches fresh."
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary" />
-
-                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_export_session_history"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
@@ -1433,6 +1416,23 @@
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp"
                     android:text="Exports the full background-ranked list from the most recent fetch — use to audit the ranking algorithm."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_export_skipped_enrichments"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Export Skipped Enrichments" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Exports every POI whose Wikipedia/Wikidata match was rejected (denylist or name-mismatch), so misses can be audited."
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
 

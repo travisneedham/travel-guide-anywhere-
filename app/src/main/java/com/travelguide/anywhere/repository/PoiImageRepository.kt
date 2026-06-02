@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.travelguide.anywhere.data.local.SkippedEnrichmentStore
 import com.travelguide.anywhere.data.model.PlaceOfInterest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 @Singleton
 class PoiImageRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val gson: Gson
+    private val gson: Gson,
+    private val skippedEnrichmentStore: SkippedEnrichmentStore,
 ) {
     /**
      * Returns a Wikipedia article URL for the POI, or null if none can be resolved.
@@ -36,19 +38,32 @@ class PoiImageRepository @Inject constructor(
                     // Non-English wikipedia tag — try Wikidata to get the English article.
                     val wd = poi.tags["wikidata"]
                     if (wd != null) {
-                        val englishUrl = fetchWikidataWikiUrl(wd)
-                        if (englishUrl != null) return@withContext englishUrl
+                        val englishTitle = fetchWikidataEnwikiTitle(wd)
+                        if (englishTitle != null && !isGenericWikipediaTitle(englishTitle) && wordsOverlap(poi.name, englishTitle)) {
+                            return@withContext "https://en.wikipedia.org/wiki/${englishTitle.replace(' ', '_')}"
+                        } else if (englishTitle != null) {
+                            val reason = if (isGenericWikipediaTitle(englishTitle)) "denylist" else "name_mismatch"
+                            Log.d(TAG, "${poi.name}: wikidata($wd) url skipped — $reason '$englishTitle'")
+                            skippedEnrichmentStore.record("url", poi.name, poi.osmId, wd, englishTitle, reason)
+                        }
                     }
-                    // No English equivalent found — fall back to the local-language URL.
+                    // No valid English equivalent — fall back to the local-language URL.
                     return@withContext "https://$lang.wikipedia.org/wiki/${title.replace(' ', '_')}"
                 }
             }
         }
         val wd = poi.tags["wikidata"] ?: return@withContext null
-        fetchWikidataWikiUrl(wd)
+        val title = fetchWikidataEnwikiTitle(wd) ?: return@withContext null
+        if (isGenericWikipediaTitle(title) || !wordsOverlap(poi.name, title)) {
+            val reason = if (isGenericWikipediaTitle(title)) "denylist" else "name_mismatch"
+            Log.d(TAG, "${poi.name}: wikidata($wd) url skipped — $reason '$title'")
+            skippedEnrichmentStore.record("url", poi.name, poi.osmId, wd, title, reason)
+            return@withContext null
+        }
+        "https://en.wikipedia.org/wiki/${title.replace(' ', '_')}"
     }
 
-    private fun fetchWikidataWikiUrl(qid: String): String? {
+    private fun fetchWikidataEnwikiTitle(qid: String): String? {
         val url = "https://www.wikidata.org/w/api.php" +
                 "?action=wbgetentities&ids=$qid&props=sitelinks&sitefilter=enwiki&format=json"
         return get(url)?.let { body ->
@@ -58,8 +73,6 @@ class PoiImageRepository @Inject constructor(
                 ?.getAsJsonObject("sitelinks")
                 ?.getAsJsonObject("enwiki")
                 ?.get("title")?.asString
-                ?.replace(' ', '_')
-                ?.let { title -> "https://en.wikipedia.org/wiki/$title" }
         }
     }
 
@@ -79,9 +92,16 @@ class PoiImageRepository @Inject constructor(
                 url?.let { return@withContext it }
             }
             wd?.let { qid ->
-                val url = fetchWikidataImage(qid)
-                Log.d(TAG, "${poi.name}: wikidata($qid)→$url")
-                url?.let { return@withContext it }
+                val enwikiTitle = fetchWikidataEnwikiTitle(qid)
+                if (enwikiTitle != null && (isGenericWikipediaTitle(enwikiTitle) || !wordsOverlap(poi.name, enwikiTitle))) {
+                    val reason = if (isGenericWikipediaTitle(enwikiTitle)) "denylist" else "name_mismatch"
+                    Log.d(TAG, "${poi.name}: wikidata($qid) image skipped — $reason '$enwikiTitle'")
+                    skippedEnrichmentStore.record("image", poi.name, poi.osmId, qid, enwikiTitle, reason)
+                } else {
+                    val url = fetchWikidataImage(qid)
+                    Log.d(TAG, "${poi.name}: wikidata($qid)→$url")
+                    url?.let { return@withContext it }
+                }
             }
             wc?.takeIf { it.startsWith("File:") }
                 ?.removePrefix("File:")
@@ -164,10 +184,13 @@ class PoiImageRepository @Inject constructor(
         }
     }
 
-    // Returns true for Wikipedia article titles that describe a generic type of thing rather
-    // than a specific named place — avoids showing stock photos and unrelated articles.
     private fun isGenericWikipediaTitle(title: String): Boolean =
         title.lowercase().trim() in GENERIC_WIKIPEDIA_TITLES
+
+    private fun wordsOverlap(poiName: String, wikiTitle: String): Boolean {
+        val aWords = poiName.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.toSet()
+        return wikiTitle.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.any { it in aWords }
+    }
 
     companion object {
         private const val TAG = "PoiImageRepository"
