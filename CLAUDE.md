@@ -8,6 +8,14 @@ If the session instructions say to develop on a named branch (e.g. `claude/...`)
 
 Never include GitHub URLs in responses. After a push, just confirm what was pushed so the user can verify the build in Android Studio or download the APK from the Actions tab.
 
+## Project docs (read these first)
+
+Planning and decisions live **in the repo** so they survive a fresh clone and are portable to any AI tool:
+- `ROADMAP.md` — phase-level status and what's next. Update it when a phase closes or direction changes.
+- `ENGINEERING_NOTES.md` — how things work: algorithms, bug post-mortems, decisions.
+
+Do not rely on plan-mode scratch files (e.g. `~/.claude/plans/...`); those are not committed. Persist anything durable into `ROADMAP.md` / `ENGINEERING_NOTES.md`.
+
 ## Versioning
 
 Increment `versionCode` and `versionName` in `app/build.gradle.kts` with every push — including bug fix and build error commits.
