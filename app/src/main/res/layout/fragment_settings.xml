@@ -1385,41 +1385,6 @@
                 android:paddingBottom="8dp"
                 android:visibility="gone">
 
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Runs raw Overpass/Wiki probes against your current location and writes results to the log. When done, use Export Full Log File and send it back."
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_poi_experiment"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Run POI API Experiment" />
-
-                <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/progress_experiment"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:indeterminate="true"
-                    android:visibility="gone"
-                    app:trackCornerRadius="2dp" />
-
-                <TextView
-                    android:id="@+id/tv_experiment_step"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:layout_marginBottom="12dp"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:visibility="gone" />
-
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_clear_poi_cache"
                     style="@style/Widget.Material3.Button.OutlinedButton"
@@ -1477,16 +1442,32 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:layout_marginBottom="8dp"
                     android:text="Copy TTS Logs" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Copies recent narration and voice-engine log lines to the clipboard."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_copy_last_200"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="8dp"
                     android:text="Copy Last 200 Log Lines" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Copies the most recent 200 lines from the full app log to the clipboard."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_export_logs"
@@ -1495,13 +1476,30 @@
                     android:layout_height="wrap_content"
                     android:text="Export Full Log File" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Saves the complete app log to a file and opens the share sheet so you can send it back."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_export_auto_logs"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
                     android:text="Export Android Auto Logs" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="Saves logs captured while connected to Android Auto and opens the share sheet."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
 
             </LinearLayout>
 
