@@ -203,6 +203,7 @@ class SettingsFragment : Fragment() {
         binding.headerApi.setOnClickListener { toggle(binding.bodyApi, binding.indApi) }
         binding.headerVoice.setOnClickListener { toggle(binding.bodyVoice, binding.indVoice) }
         binding.headerInterests.setOnClickListener { toggle(binding.bodyInterests, binding.indInterests) }
+        binding.headerAttractions.setOnClickListener { toggle(binding.bodyAttractions, binding.indAttractions) }
         binding.headerHistory.setOnClickListener { toggle(binding.bodyHistory, binding.indHistory) }
         binding.headerPrompts.setOnClickListener { toggle(binding.bodyPrompts, binding.indPrompts) }
         binding.headerDiag.setOnClickListener { toggle(binding.bodyDiag, binding.indDiag) }
@@ -573,13 +574,15 @@ class SettingsFragment : Fragment() {
         binding.cbFilterPark.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PARK, true)
         binding.cbFilterPlaceOfWorship.isChecked = prefs.getBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, true)
 
+        // Toggling the parent Attractions checkbox selects/deselects all of its subcategories.
+        // Attached after the initial load above, so restoring each subcategory's saved state does
+        // not fire this and clobber the user's individual choices.
         val subCheckboxes = listOf(
             binding.cbFilterSubStadium, binding.cbFilterSubRide, binding.cbFilterSubZoo,
             binding.cbFilterSubThemePark, binding.cbFilterSubGarden, binding.cbFilterSubTower
         )
-        subCheckboxes.forEach { it.isEnabled = binding.cbFilterAttraction.isChecked }
         binding.cbFilterAttraction.setOnCheckedChangeListener { _, isChecked ->
-            subCheckboxes.forEach { it.isEnabled = isChecked }
+            subCheckboxes.forEach { it.isChecked = isChecked }
         }
 
         val cap = prefs.getInt(PoiRepository.PREF_FAMOUS_SHARD_CAP, PoiRepository.DEFAULT_FAMOUS_SHARD_CAP)

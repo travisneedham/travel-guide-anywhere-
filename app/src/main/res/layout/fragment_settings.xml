@@ -181,74 +181,99 @@
                     android:buttonTint="@color/accent"
                     android:checked="true" />
 
-                <CheckBox
-                    android:id="@+id/cb_filter_attraction"
+                <LinearLayout
+                    android:id="@+id/header_attractions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Attractions"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground">
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_stadium"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:text="Stadiums &amp; Arenas"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    <CheckBox
+                        android:id="@+id/cb_filter_attraction"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Attractions"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_ride"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:text="Rides &amp; Coasters"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    <TextView
+                        android:id="@+id/ind_attractions"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="8dp"
+                        android:text="▶"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_zoo"
+                <LinearLayout
+                    android:id="@+id/body_attractions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:orientation="vertical"
                     android:paddingStart="24dp"
-                    android:text="Zoos &amp; Aquariums"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    android:visibility="gone">
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_theme_park"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:text="Theme Parks"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_stadium"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Stadiums &amp; Arenas"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_garden"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:text="Gardens &amp; Nature Reserves"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_ride"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Rides &amp; Coasters"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
 
-                <CheckBox
-                    android:id="@+id/cb_filter_sub_tower"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:text="Towers &amp; Landmarks"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/accent"
-                    android:checked="true" />
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_zoo"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Zoos &amp; Aquariums"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
+
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_theme_park"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Theme Parks"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
+
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_garden"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Gardens &amp; Nature Reserves"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
+
+                    <CheckBox
+                        android:id="@+id/cb_filter_sub_tower"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Towers &amp; Landmarks"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/accent"
+                        android:checked="true" />
+                </LinearLayout>
 
                 <CheckBox
                     android:id="@+id/cb_filter_artwork"
@@ -281,7 +306,7 @@
                     android:id="@+id/cb_filter_place_of_worship"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Places of Worship"
+                    android:text="Modern Places of Worship"
                     android:textColor="@color/text_primary"
                     android:buttonTint="@color/accent"
                     android:checked="true" />
