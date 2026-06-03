@@ -908,4 +908,39 @@ Current working combo (as of v3.2.8):
 - Hilt `2.58` (last version before `POST_COMPILATION_CLASSES` which requires AGP 9.0+)
 - `androidx.core:core-ktx` `1.18.0`
 
+---
+
+## Bug post-mortem: Fetch-timer NPE on foldable (v3.5.6, fixed v3.5.7)
+
+**Symptom**: NPE crash on Samsung Galaxy Z Fold during a famous-mode tour fetch.
+```
+java.lang.NullPointerException at MainFragment.getBinding (MainFragment.kt:42)
+  invoked from MainFragment$observeState$1$1$1$1$1.invokeSuspend (MainFragment.kt:378)
+  resumed after HandlerContext$scheduleResumeAfterDelay (i.e. after a delay())
+```
+
+**Root cause**: The FETCHING-state elapsed-time ticker in `observeState()` was launched on the
+plain fragment `lifecycleScope` rather than `viewLifecycleOwner.lifecycleScope`:
+```kotlin
+fetchTimerJob = lifecycleScope.launch {      // ← escaped repeatOnLifecycle cancellation
+    while (true) {
+        binding.tvStatus.text = "...(${elapsed}s)"  // NPE after view destroyed
+        delay(1_000L)
+    }
+}
+```
+All other collectors in `observeState()` are children of `viewLifecycleOwner.repeatOnLifecycle(
+STARTED)` and are cancelled when the view is destroyed. This one escaped that scope. On foldable
+devices, folding/unfolding destroys and recreates the fragment view while the fragment instance
+survives; `onDestroyView()` nulls `_binding`, the timer resumed from `delay()`, and crashed.
+
+**Fix**: `lifecycleScope.launch` → `viewLifecycleOwner.lifecycleScope.launch` + `binding.` →
+`_binding?.` as belt-and-suspenders (MainFragment.kt:375–378). The view-lifecycle `ON_DESTROY` is
+dispatched before `onDestroyView()` nulls `_binding`, so the timer is already cancelled and cannot
+resume after the view is gone.
+
+**Rule**: Any coroutine that touches `binding` must be launched on `viewLifecycleOwner.lifecycleScope`
+(or be a child of a `repeatOnLifecycle` block). Plain `lifecycleScope` is only safe for ViewModel
+calls and non-view work.
+
 See `CLAUDE.md` for the full constraint list.
