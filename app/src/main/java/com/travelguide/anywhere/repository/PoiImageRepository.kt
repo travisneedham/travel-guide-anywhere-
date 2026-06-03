@@ -188,8 +188,8 @@ class PoiImageRepository @Inject constructor(
         title.lowercase().trim() in GENERIC_WIKIPEDIA_TITLES
 
     private fun wordsOverlap(poiName: String, wikiTitle: String): Boolean {
-        val aWords = poiName.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.toSet()
-        return wikiTitle.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.any { it in aWords }
+        val aWords = poiName.lowercase().split(Regex("[\\W_]+")).filter { it.length > 3 }.toSet()
+        return wikiTitle.lowercase().split(Regex("[\\W_]+")).filter { it.length > 3 }.any { it in aWords }
     }
 
     companion object {

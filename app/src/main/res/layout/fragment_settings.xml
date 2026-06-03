@@ -1469,14 +1469,14 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Export Skipped Enrichments" />
+                    android:text="View Skipped Enrichments" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp"
-                    android:text="Exports every POI whose Wikipedia/Wikidata match was rejected (denylist or name-mismatch), so misses can be audited."
+                    android:text="Shows every POI whose Wikipedia/Wikidata match was rejected (denylist or name-mismatch). Review the list in-app, then export as TSV to audit false positives."
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
 

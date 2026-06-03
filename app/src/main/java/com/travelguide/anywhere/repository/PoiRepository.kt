@@ -446,8 +446,8 @@ class PoiRepository @Inject constructor(
     // ── Wiki Enrichment ──────────────────────────────────────────────────────
 
     private fun wordsOverlap(poiName: String, wikiTitle: String): Boolean {
-        val aWords = poiName.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.toSet()
-        return wikiTitle.lowercase().split(Regex("\\W+")).filter { it.length > 3 }.any { it in aWords }
+        val aWords = poiName.lowercase().split(Regex("[\\W_]+")).filter { it.length > 3 }.toSet()
+        return wikiTitle.lowercase().split(Regex("[\\W_]+")).filter { it.length > 3 }.any { it in aWords }
     }
 
     private suspend fun enrichWithWikiData(pois: List<PlaceOfInterest>): List<PlaceOfInterest> =

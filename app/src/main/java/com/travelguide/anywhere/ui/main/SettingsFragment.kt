@@ -857,45 +857,23 @@ class SettingsFragment : Fragment() {
                     return@launch
                 }
                 val ctx = requireContext()
-                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                data class SaveResult(val displayPath: String, val uri: Uri)
-                val saved = withContext(Dispatchers.IO) {
-                    val sb = StringBuilder("timestamp\tsource\treason\tpoiName\tresolvedTitle\tqid\tosmId\n")
+                val summary = buildString {
                     entries.forEach { e ->
-                        sb.append("${e.skippedAt}\t${e.source}\t${e.reason}\t${e.poiName}\t${e.resolvedTitle}\t${e.qid ?: ""}\t${e.osmId}\n")
+                        append(e.poiName).append('\n')
+                        append("  ").append(e.reason).append(" · ").append(e.resolvedTitle)
+                        if (e.qid != null) append("  (").append(e.source).append(", ").append(e.qid).append(')')
+                        else append("  (").append(e.source).append(')')
+                        append('\n')
                     }
-                    val content = sb.toString()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val resolver = ctx.contentResolver
-                        val cv = ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, "skipped_enrichments_$ts.tsv")
-                            put(MediaStore.Downloads.MIME_TYPE, "text/tab-separated-values")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
-                        resolver.openOutputStream(uri)!!.use { it.write(content.toByteArray()) }
-                        cv.clear(); cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        resolver.update(uri, cv, null, null)
-                        SaveResult("Downloads/skipped_enrichments_$ts.tsv", uri)
-                    } else {
-                        val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
-                        outDir.mkdirs()
-                        val f = File(outDir, "skipped_enrichments_$ts.tsv").also { it.writeText(content) }
-                        SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
-                    }
-                }
+                }.trimEnd()
                 MaterialAlertDialogBuilder(ctx)
-                    .setTitle("Skipped Enrichments Saved")
-                    .setMessage("${entries.size} entries • ${saved.displayPath}")
-                    .setPositiveButton("Share File") { _, _ ->
-                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_STREAM, saved.uri)
-                            putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Skipped Enrichments $ts")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, "Share Skipped Enrichments"))
+                    .setTitle("Skipped Enrichments (${entries.size})")
+                    .setMessage(summary)
+                    .setPositiveButton("Export TSV") { _, _ ->
+                        lifecycleScope.launch { exportSkippedEnrichmentsTsv(entries) }
                     }
-                    .setNegativeButton("Done", null).show()
+                    .setNegativeButton("Close", null)
+                    .show()
             }
         }
         binding.btnCopyLogs.setOnClickListener {
@@ -1075,6 +1053,49 @@ class SettingsFragment : Fragment() {
                 if (binding.rbLocalSmollm2.isChecked) LocalLlmModelManager.LocalModel.SMOLLM2.name
                 else LocalLlmModelManager.LocalModel.PHI4_MINI.name)
             .apply()
+    }
+
+    private suspend fun exportSkippedEnrichmentsTsv(entries: List<SkippedEnrichmentStore.Entry>) {
+        val ctx = context ?: return
+        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        data class SaveResult(val displayPath: String, val uri: Uri)
+        val saved = withContext(Dispatchers.IO) {
+            val sb = StringBuilder("timestamp\tsource\treason\tpoiName\tresolvedTitle\tqid\tosmId\n")
+            entries.forEach { e ->
+                sb.append("${e.skippedAt}\t${e.source}\t${e.reason}\t${e.poiName}\t${e.resolvedTitle}\t${e.qid ?: ""}\t${e.osmId}\n")
+            }
+            val content = sb.toString()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = ctx.contentResolver
+                val cv = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, "skipped_enrichments_$ts.tsv")
+                    put(MediaStore.Downloads.MIME_TYPE, "text/tab-separated-values")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                resolver.openOutputStream(uri)!!.use { it.write(content.toByteArray()) }
+                cv.clear(); cv.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, cv, null, null)
+                SaveResult("Downloads/skipped_enrichments_$ts.tsv", uri)
+            } else {
+                val outDir = ctx.getExternalFilesDir("Logs") ?: ctx.filesDir
+                outDir.mkdirs()
+                val f = File(outDir, "skipped_enrichments_$ts.tsv").also { it.writeText(content) }
+                SaveResult(f.absolutePath, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f))
+            }
+        }
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("Skipped Enrichments Saved")
+            .setMessage("${entries.size} entries • ${saved.displayPath}")
+            .setPositiveButton("Share File") { _, _ ->
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, saved.uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Travel Guide Skipped Enrichments $ts")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }, "Share Skipped Enrichments"))
+            }
+            .setNegativeButton("Done", null).show()
     }
 
     private suspend fun readTtsLogs(): String = withContext(Dispatchers.IO) {
