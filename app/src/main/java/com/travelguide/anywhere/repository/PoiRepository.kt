@@ -64,7 +64,10 @@ class PoiRepository @Inject constructor(
         private const val PREF_WIKI_VIEWS_PREFIX = "wiki_v_"
         private const val PREF_WIKI_SLINKS_PREFIX = "wiki_s_"
         private const val ENRICH_LIMIT = 60
-        private const val FAMOUS_SHARD_CAP = 1200  // was 300; raising the cap is free — Overpass already found the matches
+        // Per-shard Overpass result cap for famous mode. User-adjustable (Interests settings); a
+        // small value risks missing famous POIs, a large one lengthens the initial famous-mode load.
+        const val PREF_FAMOUS_SHARD_CAP = "pref_famous_shard_cap"
+        const val DEFAULT_FAMOUS_SHARD_CAP = 1200  // was 300; raising the cap is free — Overpass already found the matches
 
         // Pre-warm / POI-list cache. The famous query is expensive (see ENGINEERING_NOTES); we cache
         // the fully-ranked result by coarse location so a tour started shortly after app launch is
@@ -363,9 +366,10 @@ class PoiRepository @Inject constructor(
      */
     private fun buildFamousQueryShards(lat: Double, lon: Double, radiusMeters: Int): List<String> {
         val a = "around:$radiusMeters,$lat,$lon"
+        val cap = prefs.getInt(PREF_FAMOUS_SHARD_CAP, DEFAULT_FAMOUS_SHARD_CAP)
         fun shard(vararg branches: String): String =
             "[out:json][timeout:$OVERPASS_SHARD_TIMEOUT_SEC];\n(\n" +
-                branches.joinToString("\n") + "\n);\nout body center $FAMOUS_SHARD_CAP;"
+                branches.joinToString("\n") + "\n);\nout body center $cap;"
 
         val shardA = shard(
             // node-only wikipedia catch-all + way-inclusive building/man_made closes the area gap

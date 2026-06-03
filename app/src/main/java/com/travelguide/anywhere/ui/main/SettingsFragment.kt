@@ -581,6 +581,16 @@ class SettingsFragment : Fragment() {
         binding.cbFilterAttraction.setOnCheckedChangeListener { _, isChecked ->
             subCheckboxes.forEach { it.isEnabled = isChecked }
         }
+
+        val cap = prefs.getInt(PoiRepository.PREF_FAMOUS_SHARD_CAP, PoiRepository.DEFAULT_FAMOUS_SHARD_CAP)
+        binding.sliderPoiCap.value = cap.toFloat().coerceIn(100f, 3000f)
+        binding.tvPoiCapLabel.text = "Max famous places per search: $cap"
+        binding.sliderPoiCap.addOnChangeListener { _, value, _ ->
+            binding.tvPoiCapLabel.text = "Max famous places per search: ${value.toInt()}"
+        }
+        binding.btnResetPoiCap.setOnClickListener {
+            binding.sliderPoiCap.value = PoiRepository.DEFAULT_FAMOUS_SHARD_CAP.toFloat()
+        }
     }
 
     private fun loadPrompts() {
@@ -1059,6 +1069,7 @@ class SettingsFragment : Fragment() {
             .putBoolean(PoiRepository.PREF_FILTER_VIEWPOINT, binding.cbFilterViewpoint.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_PARK, binding.cbFilterPark.isChecked)
             .putBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, binding.cbFilterPlaceOfWorship.isChecked)
+            .putInt(PoiRepository.PREF_FAMOUS_SHARD_CAP, binding.sliderPoiCap.value.toInt())
             .putString(NarrationRepository.PREF_DEEP_DIVE_PROMPT, binding.etDeepDivePrompt.text?.toString() ?: "")
             .putString(NarrationRepository.PREF_LOCAL_LLM_MODEL,
                 if (binding.rbLocalSmollm2.isChecked) LocalLlmModelManager.LocalModel.SMOLLM2.name

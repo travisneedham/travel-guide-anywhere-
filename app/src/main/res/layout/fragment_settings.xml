@@ -294,6 +294,50 @@
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="8dp" />
 
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/stroke"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:id="@+id/tv_poi_cap_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Max famous places per search: 1200"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginBottom="2dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Caps how many places famous mode pulls from the map in a single search. A small number loads faster but can miss famous points of interest; a larger number is more thorough but lengthens the initial load in famous mode."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginBottom="4dp" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/slider_poi_cap"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:valueFrom="100"
+                    android:valueTo="3000"
+                    android:stepSize="100"
+                    android:value="1200"
+                    app:thumbColor="@color/accent"
+                    app:trackColorActive="@color/accent"
+                    app:trackColorInactive="@color/stroke" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_reset_poi_cap"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reset to default (1200)"
+                    android:textColor="@color/accent" />
+
             </LinearLayout>
 
             <View
