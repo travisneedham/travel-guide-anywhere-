@@ -1454,6 +1454,23 @@
                 android:paddingBottom="8dp"
                 android:visibility="gone">
 
+                <CheckBox
+                    android:id="@+id/cb_web_search"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:buttonTint="@color/accent"
+                    android:text="Web search for unknown places" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Lets the AI search the web when no Wikipedia article exists for a place. May add a few seconds to narration generation."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_export_session_history"
                     style="@style/Widget.Material3.Button.OutlinedButton"

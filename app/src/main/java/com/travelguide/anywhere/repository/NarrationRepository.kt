@@ -64,6 +64,13 @@ class NarrationRepository @Inject constructor(
             Log.d(TAG, "Wikipedia context for '${poi.name}': ${wikiExtract.length} chars")
         }
 
+        val wikidataFacts = if (wikiExtract == null) {
+            poi.tags["wikidata"]?.let { fetchWikidataFacts(it) }
+        } else null
+        if (wikidataFacts != null) {
+            Log.d(TAG, "Wikidata facts for '${poi.name}': $wikidataFacts")
+        }
+
         val systemPrompt = prefs.getString(PREF_SYSTEM_PROMPT, "")
             ?.takeIf { it.isNotBlank() } ?: ClaudeApiService.SYSTEM_PROMPT
 
@@ -77,10 +84,17 @@ class NarrationRepository @Inject constructor(
             "perched on a rocky headland\" or \"The childhood home of a notorious outlaw.\" " +
             "Do not start with the place name. Follow it with exactly one blank line, then begin your narration."
 
+        val hasContext = wikiExtract != null || wikidataFacts != null
+        val webSearchEnabled = !hasContext && prefs.getBoolean(PREF_WEB_SEARCH_ENABLED, false)
+
         val userMessageText = buildString {
             append(baseUserMessage)
-            if (wikiExtract != null) {
-                append("\n\n---\nBackground context from Wikipedia:\n\n$wikiExtract")
+            when {
+                wikiExtract != null -> append("\n\n---\nBackground context from Wikipedia:\n\n$wikiExtract")
+                wikidataFacts != null -> append("\n\n---\nKnown facts about this place:\n\n$wikidataFacts")
+            }
+            if (webSearchEnabled) {
+                append("\n\nSearch for specific historical facts, founding date, notable people, and stories about this exact location.")
             }
             append(summaryInstruction)
         }
@@ -93,7 +107,7 @@ class NarrationRepository @Inject constructor(
             expiryDays = expiryDays,
         )
 
-        val maxTokens = maxTokensFor(poi, wikiExtract != null)
+        val maxTokens = maxTokensFor(poi, hasContext)
         val messages = history + listOf(ClaudeMessage(role = "user", content = userMessageText))
 
         val provider = prefs.getString(PREF_NARRATION_PROVIDER, NARRATION_PROVIDER_ANTHROPIC)
@@ -147,11 +161,20 @@ class NarrationRepository @Inject constructor(
             ?: BuildConfig.ANTHROPIC_API_KEY
         val anthropicModel = savedModel.takeIf { it.isNotBlank() } ?: "claude-haiku-4-5-20251001"
 
+        val tools = if (webSearchEnabled) listOf(
+            com.travelguide.anywhere.data.remote.dto.ClaudeTool(
+                type = "web_search_20250305",
+                name = "web_search",
+                maxUses = 2,
+            )
+        ) else null
+
         val request = ClaudeRequest(
             model = anthropicModel,
             system = systemPrompt,
             messages = messages,
             maxTokens = maxTokens,
+            tools = tools,
         )
 
         repeat(3) { attempt ->
@@ -484,8 +507,21 @@ class NarrationRepository @Inject constructor(
             val lang = wikipediaTag.substring(0, colon)
             val title = wikipediaTag.substring(colon + 1)
 
+            val cacheKey = "wiki_x_" + (lang + "_" + title)
+                .replace(Regex("[^a-zA-Z0-9_]"), "_").take(80)
+            val cached = prefs.getString(cacheKey, null)
+            if (cached != null) {
+                val pipe = cached.indexOf('|')
+                if (pipe > 0) {
+                    val ts = cached.substring(0, pipe).toLongOrNull() ?: 0L
+                    if (System.currentTimeMillis() - ts < 7L * 24 * 60 * 60 * 1000) {
+                        return@withContext cached.substring(pipe + 1).ifBlank { null }
+                    }
+                }
+            }
+
             val url = "https://$lang.wikipedia.org/w/api.php?" +
-                "action=query&prop=extracts&exintro=true&explaintext=true" +
+                "action=query&prop=extracts&explaintext=true" +
                 "&titles=${URLEncoder.encode(title, "UTF-8")}&format=json"
 
             val httpRequest = Request.Builder()
@@ -510,7 +546,9 @@ class NarrationRepository @Inject constructor(
             val extract = page.get("extract")?.asString?.trim() ?: return@withContext null
             if (extract.isBlank()) return@withContext null
 
-            extract.take(6000)
+            val result = extract.take(21_000)
+            prefs.edit().putString(cacheKey, "${System.currentTimeMillis()}|$result").apply()
+            result
         } catch (e: Exception) {
             Log.w(TAG, "Wikipedia fetch failed for '$wikipediaTag': ${e.message}")
             null
@@ -544,6 +582,95 @@ class NarrationRepository @Inject constructor(
         }
     }
 
+    private suspend fun fetchWikidataFacts(qid: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val cacheKey = "wiki_f_${qid.replace(Regex("[^a-zA-Z0-9]"), "_").take(20)}"
+            val cached = prefs.getString(cacheKey, null)
+            if (cached != null) {
+                val pipe = cached.indexOf('|')
+                if (pipe > 0) {
+                    val ts = cached.substring(0, pipe).toLongOrNull() ?: 0L
+                    if (System.currentTimeMillis() - ts < 7L * 24 * 60 * 60 * 1000) {
+                        return@withContext cached.substring(pipe + 1).ifBlank { null }
+                    }
+                }
+            }
+
+            val claimsRequest = Request.Builder()
+                .url("https://www.wikidata.org/w/api.php?action=wbgetentities&ids=$qid&props=claims&format=json")
+                .get()
+                .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+                .build()
+            val claimsBody = okHttpClient.newCall(claimsRequest).execute().use { r ->
+                if (!r.isSuccessful) return@withContext null
+                r.body?.string() ?: return@withContext null
+            }
+
+            val claims = com.google.gson.JsonParser.parseString(claimsBody).asJsonObject
+                ?.getAsJsonObject("entities")?.getAsJsonObject(qid)
+                ?.getAsJsonObject("claims")
+                ?: return@withContext null
+
+            fun entityQids(prop: String) = claims.getAsJsonArray(prop)
+                ?.mapNotNull { it.asJsonObject?.getAsJsonObject("mainsnak")
+                    ?.getAsJsonObject("datavalue")?.getAsJsonObject("value")?.get("id")?.asString }
+                ?: emptyList()
+
+            fun timeYear(prop: String) = claims.getAsJsonArray(prop)?.firstOrNull()
+                ?.asJsonObject?.getAsJsonObject("mainsnak")
+                ?.getAsJsonObject("datavalue")?.getAsJsonObject("value")
+                ?.get("time")?.asString
+                ?.let { Regex("^[+-](\\d{4})").find(it)?.groupValues?.get(1)?.takeIf { y -> y != "0000" } }
+
+            val instanceOfQids = entityQids("P31").take(2)
+            val architectQids  = entityQids("P84").take(2)
+            val inceptionYear  = timeYear("P571")
+            val openingYear    = timeYear("P1619")
+            val heightMetres   = claims.getAsJsonArray("P2048")?.firstOrNull()
+                ?.asJsonObject?.getAsJsonObject("mainsnak")
+                ?.getAsJsonObject("datavalue")?.getAsJsonObject("value")
+                ?.get("amount")?.asString?.trimStart('+')?.toDoubleOrNull()
+                ?.let { "%.0f".format(it) }
+
+            val entityQidsToResolve = (instanceOfQids + architectQids).distinct()
+            val entityLabels: Map<String, String> = if (entityQidsToResolve.isNotEmpty()) {
+                val labelsRequest = Request.Builder()
+                    .url("https://www.wikidata.org/w/api.php?action=wbgetentities" +
+                        "&ids=${entityQidsToResolve.joinToString("|")}" +
+                        "&props=labels&languages=en&format=json")
+                    .get()
+                    .header("User-Agent", "TravelGuideAnywhere/2.0 (Android)")
+                    .build()
+                val labelsBody = okHttpClient.newCall(labelsRequest).execute().use { r -> r.body?.string() }
+                com.google.gson.JsonParser.parseString(labelsBody ?: "{}").asJsonObject
+                    ?.getAsJsonObject("entities")
+                    ?.entrySet()?.associate { (id, ent) ->
+                        id to (ent.asJsonObject?.getAsJsonObject("labels")
+                            ?.getAsJsonObject("en")?.get("value")?.asString ?: "")
+                    } ?: emptyMap()
+            } else emptyMap()
+
+            val facts = buildString {
+                instanceOfQids.mapNotNull { entityLabels[it]?.takeIf { l -> l.isNotBlank() } }
+                    .takeIf { it.isNotEmpty() }?.let { append("Type: ${it.joinToString(", ")}. ") }
+                (inceptionYear ?: openingYear)?.let { append("Founded/built: $it. ") }
+                if (inceptionYear != null && openingYear != null && openingYear != inceptionYear) {
+                    append("Opened: $openingYear. ")
+                }
+                architectQids.mapNotNull { entityLabels[it]?.takeIf { l -> l.isNotBlank() } }
+                    .takeIf { it.isNotEmpty() }?.let { append("Architect: ${it.joinToString(", ")}. ") }
+                heightMetres?.let { append("Height: $it metres. ") }
+            }.trim()
+
+            val result = facts.ifBlank { null }
+            prefs.edit().putString(cacheKey, "${System.currentTimeMillis()}|${result ?: ""}").apply()
+            result
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchWikidataFacts failed for $qid: ${e.message}")
+            null
+        }
+    }
+
     private fun maxTokensFor(poi: PlaceOfInterest, hasWikiContext: Boolean): Int {
         val score = poi.fameScore
         return when {
@@ -568,6 +695,7 @@ class NarrationRepository @Inject constructor(
         const val PREF_LOCAL_LLM_MODEL = "pref_local_llm_model"
         const val PREF_SYSTEM_PROMPT = "pref_system_prompt"
         const val PREF_ANTHROPIC_SPEND_USD = "pref_anthropic_spend_usd"
+        const val PREF_WEB_SEARCH_ENABLED = "pref_web_search_enabled"
         const val PREF_DEEP_DIVE_PROMPT = "pref_deep_dive_prompt"
         const val DEFAULT_DEEP_DIVE_PROMPT =
             "I'm standing near {subject}. Tell me something new and fascinating about this " +

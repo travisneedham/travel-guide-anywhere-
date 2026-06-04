@@ -729,6 +729,8 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupDiagnostics() {
+        binding.cbWebSearch.isChecked = prefs.getBoolean(NarrationRepository.PREF_WEB_SEARCH_ENABLED, false)
+
         val expiryDays = prefs.getInt(NarrationHistoryStore.PREF_EXPIRY_DAYS, NarrationHistoryStore.DEFAULT_EXPIRY_DAYS)
         binding.sliderHistoryExpiry.value = expiryDays.toFloat().coerceIn(5f, 90f)
         binding.tvHistoryExpiryLabel.text = "Narration memory: $expiryDays days"
@@ -1052,6 +1054,7 @@ class SettingsFragment : Fragment() {
             .putBoolean(PoiRepository.PREF_FILTER_PLACE_OF_WORSHIP, binding.cbFilterPlaceOfWorship.isChecked)
             .putInt(PoiRepository.PREF_FAMOUS_SHARD_CAP, binding.sliderPoiCap.value.toInt())
             .putString(NarrationRepository.PREF_DEEP_DIVE_PROMPT, binding.etDeepDivePrompt.text?.toString() ?: "")
+            .putBoolean(NarrationRepository.PREF_WEB_SEARCH_ENABLED, binding.cbWebSearch.isChecked)
             .putString(NarrationRepository.PREF_LOCAL_LLM_MODEL,
                 if (binding.rbLocalSmollm2.isChecked) LocalLlmModelManager.LocalModel.SMOLLM2.name
                 else LocalLlmModelManager.LocalModel.PHI4_MINI.name)

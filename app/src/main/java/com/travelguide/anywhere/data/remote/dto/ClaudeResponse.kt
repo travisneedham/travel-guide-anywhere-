@@ -9,7 +9,17 @@ data class ClaudeResponse(
     val error: ClaudeError? = null,
     val usage: ClaudeUsage? = null,
 ) {
-    val text: String get() = content.firstOrNull { it.type == "text" }?.text ?: ""
+    // When web search is used, the response contains pre-search commentary text blocks followed by
+    // server_tool_use and web_search_tool_result blocks, then the final answer text blocks.
+    // Skip everything up to and including the last search result block.
+    val text: String get() {
+        val lastSearchIdx = content.indexOfLast { it.type == "web_search_tool_result" }
+        return if (lastSearchIdx >= 0) {
+            content.drop(lastSearchIdx + 1).filter { it.type == "text" }.joinToString("") { it.text }
+        } else {
+            content.filter { it.type == "text" }.joinToString("") { it.text }
+        }
+    }
 }
 
 data class ClaudeContent(
