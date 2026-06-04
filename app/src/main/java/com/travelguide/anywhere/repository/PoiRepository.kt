@@ -80,6 +80,9 @@ class PoiRepository @Inject constructor(
         // prewarm() so the launch-time fetch targets the parameters the user is most likely to reuse.
         const val PREF_LAST_RADIUS_MILES = "pref_last_radius_miles"
         const val PREF_LAST_FAMOUS_MODE = "pref_last_famous_mode"
+        // Key written after every real tour fetch (never a startup prewarm) so the export always
+        // reflects the tour location rather than the device-location prewarm.
+        private const val PREF_LAST_TOUR_POI_KEY = "pref_last_tour_poi_key"
 
         private const val OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private const val OVERPASS_MIRROR_ENDPOINT = "https://overpass.kumi.systems/api/interpreter"
@@ -126,7 +129,7 @@ class PoiRepository @Inject constructor(
         }
         Log.d(TAG, "[prewarm] starting fetch for $key (radius=${radiusMiles}mi, famous=$famousMode)")
         val job = repoScope.async {
-            try { fetchPoisInternal(location, radiusMiles, famousMode, key) }
+            try { fetchPoisInternal(location, radiusMiles, famousMode, key, fromPrewarm = true) }
             finally { inFlight.remove(key) }
         }
         inFlight[key] = job
@@ -173,6 +176,7 @@ class PoiRepository @Inject constructor(
         radiusMiles: Float,
         famousMode: Boolean,
         cacheKey: String,
+        fromPrewarm: Boolean = false,
     ): List<PlaceOfInterest> = withContext(Dispatchers.IO) {
         val radiusMeters = (radiusMiles * 1609.34).toInt()
 
@@ -203,6 +207,11 @@ class PoiRepository @Inject constructor(
                     "dist=${"%.1f".format(p.distanceMiles)}mi")
             }
             cachePois(cacheKey, sorted)
+            // Track the key that belongs to the most recent actual tour fetch so the export
+            // ("Export Ranked POI List") always reflects the tour, not a startup prewarm.
+            if (!fromPrewarm) {
+                prefs.edit().putString(PREF_LAST_TOUR_POI_KEY, cacheKey).apply()
+            }
         }
         sorted
     }
@@ -630,9 +639,19 @@ class PoiRepository @Inject constructor(
         }
     }
 
-    /** Returns the most recently cached ranked POI list across all locations/modes, or null if nothing cached. */
+    /**
+     * Returns the ranked POI list from the most recent actual tour — not the startup prewarm.
+     * Uses the key recorded by the last non-prewarm fetch as the preferred source; falls back to
+     * the most recently timestamped cache entry if no tour key is recorded yet.
+     */
     fun mostRecentCachedPois(): List<PlaceOfInterest>? {
         val envelopeType = object : TypeToken<PoiCacheEnvelope>() {}.type
+        // Prefer the key that was written by the last real tour fetch (never a device-location prewarm).
+        val lastTourKey = prefs.getString(PREF_LAST_TOUR_POI_KEY, null)
+        if (lastTourKey != null) {
+            cachedPois(lastTourKey)?.let { return it }
+        }
+        // Fallback: timestamp scan (safe for users who haven't run a tour since the update).
         return prefs.all
             .filterKeys { it.startsWith(PREF_POI_CACHE_PREFIX) }
             .mapNotNull { (_, v) ->
