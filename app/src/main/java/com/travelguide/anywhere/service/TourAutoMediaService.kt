@@ -110,6 +110,11 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
             launch {
                 TourGuideService.tourState.collect { state ->
                     Log.d(TAG, "Tour state → $state")
+                    // Proactively grab audio focus when a tour starts from the phone app (not just
+                    // via the media session's onPlay), so narration routes to the car immediately.
+                    if (state == TourState.LOCATING || state == TourState.SPEAKING) {
+                        requestAudioFocus()
+                    }
                     pushPlaybackState(state)
                     pushMetadata(TourGuideService.currentTopic.value, state)
                 }
@@ -245,17 +250,30 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
                 PlaybackStateCompat.ACTION_STOP
             TourState.PAUSED ->
                 PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                 PlaybackStateCompat.ACTION_STOP
             else ->
-                PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID
+                PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT
         }
         Log.d(TAG, "pushPlaybackState: $state → pbState=$pbState")
-        session.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setState(pbState, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
-                .setActions(actions)
-                .build()
-        )
+        val builder = PlaybackStateCompat.Builder()
+            .setState(pbState, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
+            .setActions(actions)
+        // Thumbs-down + Maps are surfaced as custom Android Auto actions while narrating.
+        if (state == TourState.SPEAKING) {
+            builder.addCustomAction(
+                PlaybackStateCompat.CustomAction.Builder(
+                    TourGuideService.ACTION_THUMBS_DOWN, "Not Interested", R.drawable.ic_thumb_down
+                ).build()
+            )
+            builder.addCustomAction(
+                PlaybackStateCompat.CustomAction.Builder(
+                    TourGuideService.ACTION_NAVIGATE, "Maps", R.drawable.ic_maps
+                ).build()
+            )
+        }
+        session.setPlaybackState(builder.build())
     }
 
     private fun pushMetadata(topic: String, state: TourState) {
@@ -327,6 +345,14 @@ class TourAutoMediaService : MediaBrowserServiceCompat() {
         override fun onSkipToNext() {
             Log.i(TAG, "SessionCallback.onSkipToNext")
             send(TourGuideService.ACTION_SKIP)
+        }
+
+        override fun onCustomAction(action: String?, extras: Bundle?) {
+            Log.i(TAG, "SessionCallback.onCustomAction action=$action")
+            when (action) {
+                TourGuideService.ACTION_THUMBS_DOWN -> send(TourGuideService.ACTION_THUMBS_DOWN)
+                TourGuideService.ACTION_NAVIGATE    -> send(TourGuideService.ACTION_NAVIGATE)
+            }
         }
 
         override fun onStop() {

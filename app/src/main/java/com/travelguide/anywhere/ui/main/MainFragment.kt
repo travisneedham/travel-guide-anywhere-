@@ -113,6 +113,12 @@ class MainFragment : Fragment() {
             binding.cardRoute.visibility = if (isTripMode) View.VISIBLE else View.GONE
             updateIdleHint()
         }
+        // MaterialButtonToggleGroup may restore its own saved view state after a config change /
+        // process recreation, clobbering the prefs-based check above. Re-enforce once the view
+        // hierarchy has settled so the persisted mode always wins.
+        binding.toggleMode.post {
+            _binding?.toggleMode?.check(if (isTripMode) R.id.btn_mode_trip else R.id.btn_mode_live)
+        }
     }
 
     private fun updateIdleHint() {
@@ -136,6 +142,10 @@ class MainFragment : Fragment() {
             }
             isFamousFirst = checkedId == R.id.btn_sort_famous
             prefs.edit().putBoolean(PREF_FAMOUS_SORT, isFamousFirst).apply()
+        }
+        // Re-enforce after the view system finishes restoring its own state (see setupModeToggle).
+        binding.toggleSort.post {
+            _binding?.toggleSort?.check(if (isFamousFirst) R.id.btn_sort_famous else R.id.btn_sort_closest)
         }
     }
 

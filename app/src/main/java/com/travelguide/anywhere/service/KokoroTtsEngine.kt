@@ -299,6 +299,13 @@ class KokoroTtsEngine(
             engine.generate(text = chunk, sid = voiceSid, speed = speechRate)
                 .save(wavFile.absolutePath)
             val mp = MediaPlayer().also {
+                // Route to USAGE_MEDIA so audio plays over car/BT outputs (e.g. Android Auto).
+                it.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
                 it.setDataSource(wavFile.absolutePath)
                 it.prepare()
             }

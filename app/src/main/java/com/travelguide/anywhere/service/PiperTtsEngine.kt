@@ -123,6 +123,13 @@ class PiperTtsEngine(
                 withContext(Dispatchers.Main) {
                     val mp = MediaPlayer()
                     try {
+                        // Route to USAGE_MEDIA so audio plays over car/BT outputs (e.g. Android Auto).
+                        mp.setAudioAttributes(
+                            android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
                         mp.setDataSource(file.absolutePath)
                         mp.setOnCompletionListener {
                             isPaused = false

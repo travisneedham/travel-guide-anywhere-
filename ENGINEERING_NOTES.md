@@ -667,6 +667,41 @@ Fix: replaced `coroutineScope { async{}.awaitAll() }` with `supervisorScope { as
 
 ---
 
+### v3.5.9 — Car-session fixes (Android Auto controls, audio routing, toggle/prewarm)
+
+A real-world Android Auto driving session surfaced five issues, all fixed in v3.5.9:
+
+**1. Skip hidden outside SPEAKING.** `TourAutoMediaService.pushPlaybackState()` only advertised
+`ACTION_SKIP_TO_NEXT` in the SPEAKING action set, so the skip control vanished while buffering or
+paused. Skip is now included in the PAUSED and BUFFERING (`else`) action sets too.
+
+**2. No thumbs-down / Maps controls in Auto.** Added two `PlaybackStateCompat.CustomAction`s
+(`ACTION_THUMBS_DOWN` → `ic_thumb_down`, `ACTION_NAVIGATE` → `ic_maps`) to the SPEAKING state,
+relayed via `SessionCallback.onCustomAction()` → `send(...)` → `TourGuideService`. Thumbs-down marks
+the current POI disliked **without skipping** (`markCurrentThumbsDown()`: `commitEarly` then
+`markThumbsDown`). Maps fires a best-effort `geo:lat,lon?q=name` `ACTION_VIEW` intent with
+`FLAG_ACTIVITY_NEW_TASK` (`navigateToCurrentPoi()`) — typically opens on the phone, not the Auto head unit.
+
+**3. No audio until replug.** The TTS `MediaPlayer`s in `PiperTtsEngine` and `KokoroTtsEngine` had
+no `AudioAttributes`, and audio focus was only requested from the media session's `onPlay()` — never
+when a tour was started from the phone app. Fix: set `USAGE_MEDIA` + `CONTENT_TYPE_SPEECH` attributes
+on both engines' players, and have `TourAutoMediaService` call `requestAudioFocus()` when `tourState`
+enters LOCATING or SPEAKING.
+
+**4. Mode toggle lost mid-session.** `MaterialButtonToggleGroup` restores its own saved view state on
+process recreation, clobbering the prefs-based `check()` in `setupModeToggle()`/`setupSortToggle()`.
+Fix: re-enforce the persisted selection in a `toggleMode.post { ... }` / `toggleSort.post { ... }`
+(null-guarded via `_binding?`) so it runs after the view system finishes restoring.
+
+**5. Slow first narration.** `applyInstallDefaults()` seeded `PREF_FAMOUS_SORT`/`PREF_RADIUS_INDEX`,
+but `PoiRepository.prewarm()` reads different keys — `PREF_LAST_RADIUS_MILES` (default 5f) and
+`PREF_LAST_FAMOUS_MODE` (default false) — which were never seeded, so the cold-start prewarm fetched
+the wrong params and was wasted. Fix: `applyInstallDefaults()` now also seeds
+`PREF_LAST_RADIUS_MILES=30f`, `PREF_LAST_FAMOUS_MODE=true`, plus `TourGuideService.PREF_LAST_RADIUS=30f`
+and `PREF_FAMOUS_MODE=true` (used by Auto's `startTour()`).
+
+---
+
 ## OpenTripMap Integration & Migration (SUPERSEDED — removed in v3.4.4)
 
 > ⚠️ **Superseded** — OpenTripMap was removed entirely in v3.4.4 (see "v3.4.4 — OpenTripMap removed"

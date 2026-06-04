@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import com.travelguide.anywhere.repository.PoiRepository
 import com.travelguide.anywhere.service.PiperVoices
 import com.travelguide.anywhere.service.TourGuideService
 import com.travelguide.anywhere.ui.main.MainFragment
@@ -38,6 +39,12 @@ class TravelGuideApp : Application(), ImageLoaderFactory {
             .putFloat(MainFragment.PREF_SPEECH_RATE, 1.0f)            // 1X narration speed
             .putString(TourGuideService.PREF_TTS_PROVIDER, "piper")   // Piper engine
             .putString(TourGuideService.PREF_PIPER_VOICE_ID, PiperVoices.DEFAULT_VOICE_ID) // LibriTTS-R
+            // Seed the keys the launch-time prewarm reads so the very first cold-start fetch targets
+            // the install defaults (30mi / famous), not the stale 5mi/closest fallbacks.
+            .putFloat(PoiRepository.PREF_LAST_RADIUS_MILES, 30f)
+            .putBoolean(PoiRepository.PREF_LAST_FAMOUS_MODE, true)
+            .putFloat(TourGuideService.PREF_LAST_RADIUS, 30f)         // used by Android Auto startTour()
+            .putBoolean(TourGuideService.PREF_FAMOUS_MODE, true)
             .putBoolean(PREF_INSTALL_DEFAULTS_APPLIED, true)
             .apply()
     }

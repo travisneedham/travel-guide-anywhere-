@@ -132,6 +132,8 @@ class TourGuideService : LifecycleService() {
                     updateNotification("Now: $savedTopicName")
                 }
             }
+            ACTION_THUMBS_DOWN -> markCurrentThumbsDown()
+            ACTION_NAVIGATE -> navigateToCurrentPoi()
             ACTION_REPLAY_POI -> handleReplayPoi(intent)
             ACTION_TOGGLE_DEEP_DIVE -> toggleDeepDive()
             ACTION_RETRY -> {
@@ -741,6 +743,45 @@ class TourGuideService : LifecycleService() {
         engine.resume()
     }
 
+    /** Android Auto thumbs-down: mark the current POI disliked without skipping narration. */
+    private fun markCurrentThumbsDown() {
+        val poi = currentNarrationPoi ?: run {
+            Log.w(TAG, "Thumbs-down: no current narration POI — ignoring")
+            return
+        }
+        val poiTags = poi.tags + mapOf("_poiType" to poi.type.name, "_diversityKey" to poi.diversityKey)
+        // Ensure the POI exists in the store, then flip its thumbs-down flag.
+        mentionedPlacesStore.commitEarly(
+            poi.osmId, poi.name, poi.lat, poi.lon,
+            currentNarrationSummary, currentNarrationWikipediaUrl, poiTags
+        )
+        if (mentionedPlacesStore.allSorted().find { it.osmId == poi.osmId }?.thumbsDown != true) {
+            mentionedPlacesStore.markThumbsDown(poi.osmId)
+        }
+        currentNarrationCommit?.invoke()
+        mentionedPlaces.value = mentionedPlacesStore.recentFive()
+        Log.i(TAG, "Thumbs-down recorded for '${poi.name}' (no skip)")
+    }
+
+    /** Android Auto Maps: open the current POI in the default maps app (best-effort). */
+    private fun navigateToCurrentPoi() {
+        val poi = currentNarrationPoi ?: run {
+            Log.w(TAG, "Navigate: no current narration POI — ignoring")
+            return
+        }
+        try {
+            val uri = android.net.Uri.parse(
+                "geo:${poi.lat},${poi.lon}?q=${android.net.Uri.encode(poi.name)}"
+            )
+            startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
+            Log.i(TAG, "Navigate launched for '${poi.name}'")
+        } catch (e: Exception) {
+            Log.w(TAG, "Navigate failed: ${e.message}")
+        }
+    }
+
     private fun skipCurrent() {
         speakGeneration++
         val poi = currentNarrationPoi
@@ -974,6 +1015,8 @@ class TourGuideService : LifecycleService() {
         const val ACTION_REPLAY_POI = "ACTION_REPLAY_POI"
         const val ACTION_TOGGLE_DEEP_DIVE = "ACTION_TOGGLE_DEEP_DIVE"
         const val ACTION_RETRY = "ACTION_RETRY"
+        const val ACTION_THUMBS_DOWN = "ACTION_THUMBS_DOWN"
+        const val ACTION_NAVIGATE = "ACTION_NAVIGATE"
         const val MAX_FETCH_RETRIES = 3
         private const val DIVERSITY_WINDOW = 3  // don't repeat a diversityKey within this many picks
         const val EXTRA_RADIUS_MILES = "EXTRA_RADIUS_MILES"
