@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="48dp"
+    android:viewportWidth="36"
+    android:viewportHeight="48">
+    <!-- Teardrop body; tip sits at the bottom-center (18,48) of the viewport. -->
+    <path
+        android:fillColor="@color/accent"
+        android:pathData="M18,0 C9.16,0 2,7.16 2,16 C2,28 18,48 18,48 C18,48 34,28 34,16 C34,7.16 26.84,0 18,0 Z"/>
+    <!-- Inner dot -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,10 C14.69,10 12,12.69 12,16 C12,19.31 14.69,22 18,22 C21.31,22 24,19.31 24,16 C24,12.69 21.31,10 18,10 Z"/>
+</vector>

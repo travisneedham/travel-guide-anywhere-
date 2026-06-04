@@ -5,6 +5,46 @@ don't re-litigate the same ground after context compaction.
 
 ---
 
+## Trip Mode: Map Pin Picker (v3.6.1)
+
+### What it does
+
+After a user searches and selects a location in trip mode, an inline **osmdroid** map appears
+(360dp tall, inside the existing route card). A teardrop pin is fixed at the screen center; the
+**map moves under the pin** (Google-style "center pin" picker). On finger-up the route regenerates
+at the new center and the walking-path polyline is redrawn.
+
+### Key design decisions
+
+- **Library: osmdroid 6.1.20** (`org.osmdroid:osmdroid-android`). Chosen because the app is already
+  fully OSM-based (Nominatim + OSRM) and osmdroid needs **no API key, no billing, no Play-services
+  Maps**. It's self-contained (zero transitive deps) and license-friendly. Initialized lazily in
+  `MainFragment.setupMap()` via `Configuration.getInstance().load(ctx, prefs)` +
+  `userAgentValue = packageName` (Wikimedia/OSM tile servers reject the default OkHttp UA).
+- **Center pin, not a map Marker.** The pin is a static `ImageView` overlaid at the FrameLayout
+  center. The teardrop drawable (`ic_map_pin.xml`, 36×48dp, tip at the bottom edge) is lifted with
+  `translationY = -24dp` (= half its height) so the **tip sits exactly on the map center**. Reading
+  `mapView.mapCenter` on finger-up therefore yields the precise point under the pin tip.
+- **Drag detection via `OnTouchListener` returning `false`.** We never consume the event (osmdroid's
+  own `onTouchEvent` still pans/zooms). On `ACTION_DOWN` we raise the pin and call
+  `parent.requestDisallowInterceptTouchEvent(true)` so the enclosing `NestedScrollView` doesn't steal
+  the vertical drag; on `ACTION_UP` we drop the pin (OvershootInterpolator bounce) and regenerate.
+  A pure tap (center didn't move > 1e-6°) is ignored to avoid needless OSRM calls.
+- **Regeneration path.** `RouteRepository.resolveRouteFromPoint(lat, lon)` reverse-geocodes the point
+  (new `NominatimService.reverse`) for a meaningful `originLabel`, then shares `buildWalkingRoute()`
+  with the search-result path. `MainViewModel.selectPoint()` mirrors `selectLocation()` and drives the
+  same `RouteParseState` (Loading → spinner over map; Ready → redraw polyline; Error → message).
+- **Recenter only on initial selection.** `showMapAt()` centers the map when a search result is tapped.
+  Drag regenerations deliberately **do not** recenter (that would fight the user's pan) — `drawRoute()`
+  only swaps the polyline overlay.
+
+### Known quirk
+
+`buildWalkingRoute()` picks a **random cardinal direction** for the 1-mile walk (pre-existing trip-mode
+behavior), so the path's heading changes on each regeneration. This is intentional/inherited, not a bug.
+
+---
+
 ## Trip Mode: Geocoding the Wrong Country ("Parthenon Bug")
 
 ### What the bug looks like

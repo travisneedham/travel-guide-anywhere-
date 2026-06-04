@@ -119,6 +119,19 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /** Regenerates the walking route from a dragged map point (lat/lon at the centered pin). */
+    fun selectPoint(lat: Double, lon: Double) {
+        searchJob?.cancel()
+        parseJob?.cancel()
+        _routeParseState.value = RouteParseState.Loading
+        parseJob = viewModelScope.launch {
+            _routeParseState.value = when (val r = routeRepository.resolveRouteFromPoint(lat, lon)) {
+                is RouteRepository.Result.Success -> RouteParseState.Ready(r.route)
+                is RouteRepository.Result.Failure -> RouteParseState.Error(r.message)
+            }
+        }
+    }
+
     fun startRouteTour(radiusMiles: Float, apiKey: String, famousMode: Boolean = false) {
         val state = _routeParseState.value
         if (state !is RouteParseState.Ready) return

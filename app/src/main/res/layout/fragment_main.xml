@@ -124,6 +124,53 @@
                     android:layout_marginTop="4dp"
                     android:visibility="gone" />
 
+                <!-- Map pin picker (shown after a location is selected). Drag the map; the pin
+                     stays centered. On finger-up the route regenerates at the new center. -->
+                <FrameLayout
+                    android:id="@+id/fl_map_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="360dp"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone">
+
+                    <org.osmdroid.views.MapView
+                        android:id="@+id/map_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
+                    <!-- Center pin. translationY = -24dp lifts the teardrop so its tip sits exactly
+                         on the map center (the ImageView is 48dp tall, tip at its bottom edge). -->
+                    <ImageView
+                        android:id="@+id/iv_map_pin"
+                        android:layout_width="36dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:translationY="-24dp"
+                        android:src="@drawable/ic_map_pin"
+                        android:contentDescription="Drag the map to position the pin" />
+
+                    <com.google.android.material.progressindicator.CircularProgressIndicator
+                        android:id="@+id/progress_map"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:indeterminate="true"
+                        android:visibility="gone"
+                        app:indicatorColor="@color/accent"
+                        app:indicatorSize="36dp"
+                        app:trackThickness="3dp" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tv_map_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Drag the map to move the pin. Lift your finger to drop it and regenerate the walk."
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:visibility="gone" />
+
                 <TextView
                     android:id="@+id/tv_route_status"
                     android:layout_width="match_parent"

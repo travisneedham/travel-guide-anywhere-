@@ -1,13 +1,17 @@
 package com.travelguide.anywhere.ui.main
 
+import android.annotation.SuppressLint
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.OvershootInterpolator
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
 import androidx.fragment.app.viewModels
@@ -33,6 +37,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.overlay.Polyline
 import java.io.File
 import javax.inject.Inject
 @AndroidEntryPoint
@@ -51,6 +60,8 @@ class MainFragment : Fragment() {
     private var fetchTimerJob: Job? = null
     private var selectedLocationText: String? = null
     private var savedRadiusIndex = DEFAULT_RADIUS_INDEX
+    private var routePolyline: Polyline? = null
+    private var basePinTranslationY = 0f
 
     @Inject lateinit var prefs: SharedPreferences
     @Inject lateinit var kokoroModelManager: KokoroModelManager
@@ -77,6 +88,7 @@ class MainFragment : Fragment() {
         setupSlider()
         setupButtons()
         setupRouteCard()
+        setupMap()
         setupNowPlayingActions()
         observeState()
         checkPiperOnStartup()
@@ -304,6 +316,7 @@ class MainFragment : Fragment() {
                 binding.etRouteUrl.setText(result.shortName)
                 binding.etRouteUrl.clearFocus()
                 hideKeyboard()
+                showMapAt(GeoPoint(result.lat, result.lon))
                 viewModel.selectLocation(result)
             }
             container.addView(item)
@@ -319,23 +332,112 @@ class MainFragment : Fragment() {
     private fun updateRouteStatus(state: MainViewModel.RouteParseState) {
         val tv = binding.tvRouteStatus
         when (state) {
-            is MainViewModel.RouteParseState.Idle -> tv.visibility = View.GONE
+            is MainViewModel.RouteParseState.Idle -> {
+                tv.visibility = View.GONE
+                hideMap()
+            }
             is MainViewModel.RouteParseState.Loading -> {
                 tv.visibility = View.VISIBLE
                 tv.setTextColor(requireContext().getColor(R.color.text_secondary))
                 tv.text = "Generating route…"
+                binding.progressMap.visibility = View.VISIBLE
             }
             is MainViewModel.RouteParseState.Ready -> {
                 tv.visibility = View.VISIBLE
                 tv.setTextColor(requireContext().getColor(R.color.accent))
                 tv.text = "Route ready: ${state.route.summaryText}"
+                binding.progressMap.visibility = View.GONE
+                drawRoute(state.route)
             }
             is MainViewModel.RouteParseState.Error -> {
                 tv.visibility = View.VISIBLE
                 tv.setTextColor(0xFFFF5252.toInt())
                 tv.text = state.message
+                binding.progressMap.visibility = View.GONE
             }
         }
+    }
+
+    // ── Map pin picker ─────────────────────────────────────────────────────────
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupMap() {
+        // osmdroid needs its config loaded (cache dir + User-Agent) before any tiles are fetched.
+        val osmPrefs = requireContext().getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE)
+        Configuration.getInstance().load(requireContext().applicationContext, osmPrefs)
+        Configuration.getInstance().userAgentValue = requireContext().packageName
+
+        val map = binding.mapView
+        map.setTileSource(TileSourceFactory.MAPNIK)
+        map.setMultiTouchControls(true)
+        map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+        map.controller.setZoom(15.0)
+
+        basePinTranslationY = -24f * resources.displayMetrics.density  // matches XML translationY=-24dp
+        binding.ivMapPin.translationY = basePinTranslationY
+
+        val liftPx = 16f * resources.displayMetrics.density
+        var downCenter: GeoPoint? = null
+
+        map.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Stop the NestedScrollView from stealing the vertical drag so the map can pan.
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    downCenter = map.mapCenter.let { GeoPoint(it.latitude, it.longitude) }
+                    binding.ivMapPin.animate().translationY(basePinTranslationY - liftPx)
+                        .setDuration(120L).start()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    binding.ivMapPin.animate().translationY(basePinTranslationY)
+                        .setInterpolator(OvershootInterpolator())
+                        .setDuration(260L).start()
+                    val center = map.mapCenter.let { GeoPoint(it.latitude, it.longitude) }
+                    val moved = downCenter?.let {
+                        kotlin.math.abs(it.latitude - center.latitude) > 1e-6 ||
+                            kotlin.math.abs(it.longitude - center.longitude) > 1e-6
+                    } ?: true
+                    if (moved && event.actionMasked == MotionEvent.ACTION_UP) {
+                        viewModel.selectPoint(center.latitude, center.longitude)
+                    }
+                    downCenter = null
+                }
+            }
+            false  // never consume — let osmdroid handle the pan/zoom
+        }
+    }
+
+    /** Reveals the map and centers it on the freshly selected search result. */
+    private fun showMapAt(point: GeoPoint) {
+        binding.flMapContainer.visibility = View.VISIBLE
+        binding.tvMapHint.visibility = View.VISIBLE
+        binding.mapView.controller.setZoom(15.0)
+        binding.mapView.controller.setCenter(point)
+        binding.ivMapPin.translationY = basePinTranslationY
+    }
+
+    private fun hideMap() {
+        _binding?.let {
+            it.flMapContainer.visibility = View.GONE
+            it.tvMapHint.visibility = View.GONE
+            it.progressMap.visibility = View.GONE
+        }
+        routePolyline = null
+    }
+
+    /** Draws (or replaces) the walking-path polyline. Never recenters — keeps the user's pan. */
+    private fun drawRoute(route: com.travelguide.anywhere.data.model.RouteData) {
+        val map = _binding?.mapView ?: return
+        routePolyline?.let { map.overlays.remove(it) }
+        val line = Polyline(map).apply {
+            outlinePaint.color = ContextCompat.getColor(requireContext(), R.color.accent)
+            outlinePaint.strokeWidth = 12f
+            setPoints(route.waypoints.map { GeoPoint(it.lat, it.lon) })
+        }
+        map.overlays.add(line)
+        routePolyline = line
+        map.invalidate()
     }
 
     // ── Piper startup ──────────────────────────────────────────────────────────
@@ -726,10 +828,21 @@ class MainFragment : Fragment() {
         dialog.show()
     }
 
+    override fun onResume() {
+        super.onResume()
+        _binding?.mapView?.onResume()
+    }
+
+    override fun onPause() {
+        _binding?.mapView?.onPause()
+        super.onPause()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         if (!sliderInSpeedMode) savedRadiusIndex = binding.rangeSlider.value.toInt()
         prefs.edit().putInt(PREF_RADIUS_INDEX, savedRadiusIndex).apply()
+        binding.mapView.onDetach()
         _binding = null
     }
 

@@ -23,8 +23,8 @@ android {
         applicationId = "com.travelguide.anywhere"
         minSdk = 26
         targetSdk = 35
-        versionCode = 205
-        versionName = "3.6.0"
+        versionCode = 206
+        versionName = "3.6.1"
 
         buildConfigField(
             "String",
@@ -140,4 +140,7 @@ dependencies {
 
     // AndroidX Media — MediaBrowserServiceCompat for Android Auto
     implementation(libs.androidx.media)
+
+    // osmdroid — OpenStreetMap map view for the trip-mode pin picker
+    implementation(libs.osmdroid)
 }

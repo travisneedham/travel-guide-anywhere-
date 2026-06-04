@@ -51,13 +51,30 @@ class RouteRepository @Inject constructor(
     }
 
     suspend fun resolveRouteFromLocation(location: LocationResult): Result = withContext(Dispatchers.IO) {
-        try {
-            val direction = CARDINAL_DIRECTIONS.random()
-            val dest = destinationPoint(location.lat, location.lon, direction.bearingDeg, WALK_DISTANCE_METERS)
-            Log.i(TAG, "resolveRoute — origin=(${location.lat},${location.lon}) " +
-                "dir=${direction.label} dest=(${dest.lat},${dest.lon})")
+        buildWalkingRoute(location.lat, location.lon, location.shortName)
+    }
 
-            val coordsStr = "${location.lon},${location.lat};${dest.lon},${dest.lat}"
+    /**
+     * Builds a walking route from an arbitrary map point (the dragged pin). Reverse-geocodes the
+     * point first so the narration has a meaningful place name; falls back to a generic label.
+     */
+    suspend fun resolveRouteFromPoint(lat: Double, lon: Double): Result = withContext(Dispatchers.IO) {
+        val shortName = try {
+            nominatimService.reverse(lat = lat, lon = lon).displayName.split(",").first().trim()
+        } catch (e: Exception) {
+            Log.w(TAG, "Reverse geocode failed for ($lat,$lon): ${e.message}")
+            ""
+        }.ifBlank { "this area" }
+        buildWalkingRoute(lat, lon, shortName)
+    }
+
+    private suspend fun buildWalkingRoute(lat: Double, lon: Double, shortName: String): Result {
+        return try {
+            val direction = CARDINAL_DIRECTIONS.random()
+            val dest = destinationPoint(lat, lon, direction.bearingDeg, WALK_DISTANCE_METERS)
+            Log.i(TAG, "resolveRoute — origin=($lat,$lon) dir=${direction.label} dest=(${dest.lat},${dest.lon})")
+
+            val coordsStr = "$lon,$lat;${dest.lon},${dest.lat}"
             val osrmResponse = osrmService.getRoute(
                 profile = TravelMode.WALKING.osrmProfile,
                 coordinates = coordsStr,
@@ -66,12 +83,12 @@ class RouteRepository @Inject constructor(
             )
 
             val route = osrmResponse.routes.firstOrNull()
-                ?: return@withContext Result.Failure("No walking route found — try a different location.")
+                ?: return Result.Failure("No walking route found — try a different location.")
 
             val waypoints = route.geometry.coordinates.map { coord ->
                 LatLon(lat = coord[1], lon = coord[0])
             }
-            if (waypoints.isEmpty()) return@withContext Result.Failure("Route has no waypoints.")
+            if (waypoints.isEmpty()) return Result.Failure("Route has no waypoints.")
 
             Result.Success(
                 RouteData(
@@ -79,8 +96,8 @@ class RouteRepository @Inject constructor(
                     totalDistanceMeters = route.distance,
                     totalDurationSeconds = route.duration.toLong(),
                     travelMode = TravelMode.WALKING,
-                    originLabel = location.shortName,
-                    destinationLabel = "1 mi ${direction.label} of ${location.shortName}",
+                    originLabel = shortName,
+                    destinationLabel = "1 mi ${direction.label} of $shortName",
                 )
             )
         } catch (e: Exception) {

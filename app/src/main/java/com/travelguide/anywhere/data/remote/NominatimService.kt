@@ -16,6 +16,16 @@ interface NominatimService {
         @Query("bounded") bounded: Int? = null,
     ): List<NominatimResult>
 
+    /** Reverse-geocodes a lat/lon back to a place name — used to label a dragged map pin. */
+    @GET("reverse")
+    suspend fun reverse(
+        @Query("lat") lat: Double,
+        @Query("lon") lon: Double,
+        @Query("format") format: String = "json",
+        @Query("zoom") zoom: Int = 16,
+        @Query("accept-language") acceptLanguage: String = "en",
+    ): NominatimResult
+
     companion object {
         const val BASE_URL = "https://nominatim.openstreetmap.org/"
     }
