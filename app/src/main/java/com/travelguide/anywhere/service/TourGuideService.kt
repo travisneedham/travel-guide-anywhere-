@@ -65,6 +65,7 @@ class TourGuideService : LifecycleService() {
     private val sessionOperators = mutableSetOf<String>()
     private val recentCategories = ArrayDeque<String>()
     private var isReplayMode = false
+    private var seededDestinationPoi: PlaceOfInterest? = null
     private var savedTopicName = ""
     @Volatile private var deepDivePoiName: String = ""
     @Volatile private var deepDivePoiSummary: String = ""
@@ -348,6 +349,18 @@ class TourGuideService : LifecycleService() {
     }
 
     private fun startRouteSimulation(route: RouteData) {
+        val firstWp = route.waypoints.firstOrNull()
+        if (firstWp != null && route.originLabel.isNotBlank()) {
+            seededDestinationPoi = PlaceOfInterest(
+                osmId = "synthetic/trip-destination",
+                name = route.originLabel,
+                lat = firstWp.lat,
+                lon = firstWp.lon,
+                type = PoiType.ATTRACTION,
+                tags = emptyMap(),
+            )
+            Log.i(TAG, "Trip destination seeded: '${route.originLabel}'")
+        }
         val sim = RouteSimulator(route)
         routeSimulator = sim
         routeAdvanceJob = lifecycleScope.launch {
@@ -394,7 +407,25 @@ class TourGuideService : LifecycleService() {
                                else "Finding interesting places nearby..."
                 updateNotification(fetchMsg, true)
 
-                val allPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
+                val overpassPois = poiRepository.fetchPois(location, radiusMiles, famousMode)
+                val allPois = run {
+                    val seedPoi = seededDestinationPoi
+                    if (seedPoi != null) {
+                        seededDestinationPoi = null
+                        val alreadyPresent = overpassPois.any { poi ->
+                            val dlat = poi.lat - seedPoi.lat
+                            val dlon = poi.lon - seedPoi.lon
+                            dlat * dlat + dlon * dlon < 0.00000324  // ≈ 200 m radius
+                        }
+                        if (alreadyPresent) {
+                            Log.d(TAG, "Destination '${seedPoi.name}' already in Overpass results — skipping seed")
+                            overpassPois
+                        } else {
+                            Log.i(TAG, "Injecting trip destination '${seedPoi.name}' as first POI")
+                            listOf(seedPoi) + overpassPois
+                        }
+                    } else overpassPois
+                }
                 val pois = allPois
                     .filterNot { poi -> mentionedPlacesStore.isNameMentioned(poi.name) }
                     .filterNot { poi ->
@@ -867,6 +898,7 @@ class TourGuideService : LifecycleService() {
         currentNarrationCommit = null
         currentNarrationSummary = ""
         currentNarrationWikipediaUrl = null
+        seededDestinationPoi = null
         isReplayMode = false
         isDeepDive.value = false
         clearDeepDiveContext()

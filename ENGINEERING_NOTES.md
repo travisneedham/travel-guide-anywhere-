@@ -5,6 +5,62 @@ don't re-litigate the same ground after context compaction.
 
 ---
 
+## Trip Mode: Missing Landmark Fix — Destination Seeding + Overpass Broadening (v3.6.3)
+
+### Problem
+
+Selecting "White House" (or any prominent building) in trip mode produced no narration about it.
+Root cause confirmed from log analysis:
+
+1. **Overpass never returned the White House way.** `buildFamousQueryShards` shardA had
+   `way["name"]["building"]["wikipedia"]` — requiring `wikipedia` *on the way element itself*.
+   The White House building way carries `wikidata=Q35525` but its `wikipedia` tag lives on the parent
+   OSM **relation**, not on the way. No query ever fetched OSM relations. `buildNearbyQuery` had no
+   way-building branch at all.
+2. **No guarantee the selected location is narrated first.** Even with a fixed Overpass query, the
+   chosen destination could lose the fameScore ranking to nearby landmarks.
+
+### Fix: two-part
+
+**Part 1 — Destination seeding (`TourGuideService.kt`)**
+
+When `startRouteSimulation(route)` is called, synthesize a `PlaceOfInterest` from
+`route.originLabel` (the Nominatim short name) and `route.waypoints.first()`:
+
+```kotlin
+seededDestinationPoi = PlaceOfInterest(
+    osmId = "synthetic/trip-destination",
+    name = route.originLabel,
+    lat = firstWp.lat, lon = firstWp.lon,
+    type = PoiType.ATTRACTION, tags = emptyMap(),
+)
+```
+
+In `startGenerationCycle()`, after `poiRepository.fetchPois()` returns, this seed is consumed
+once: if no Overpass POI is within ~200 m of the seed, it is prepended to the list; otherwise
+it is skipped (duplicate detected by pythagorean distance in degrees²). `seededDestinationPoi`
+is also cleared in `stopTour()`.
+
+**Part 2 — Overpass broadening (`PoiRepository.kt`)**
+
+`buildNearbyQuery` — added two branches at end of union:
+```
+way["name"]["wikidata"][!"shop"](around:...)
+relation["name"]["wikidata"][!"shop"](around:...)
+```
+
+`buildFamousQueryShards` shardA — added one branch at end of union:
+```
+way["name"]["wikidata"][!"shop"]["place"!~"city|town|..."](around:...)
+relation["name"]["wikidata"][!"shop"]["place"!~"city|town|..."](around:...)
+```
+
+These catch famous buildings/areas whose `wikidata` tag is on the way or relation element but
+whose `wikipedia` tag is on a parent relation (the White House pattern). The `[!"shop"]` and
+`place-type` exclusions prevent commercial and administrative clutter.
+
+---
+
 ## Trip Mode: Map Pin Picker (v3.6.1)
 
 ### What it does

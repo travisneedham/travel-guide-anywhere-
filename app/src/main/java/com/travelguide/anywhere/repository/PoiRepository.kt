@@ -355,6 +355,8 @@ class PoiRepository @Inject constructor(
         "  way[\"name\"][\"amenity\"=\"marketplace\"](around:$radiusMeters,$lat,$lon);\n" +
         "  node[\"name\"][\"place\"=\"square\"](around:$radiusMeters,$lat,$lon);\n" +
         "  way[\"name\"][\"place\"=\"square\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  way[\"name\"][\"wikidata\"][!\"shop\"](around:$radiusMeters,$lat,$lon);\n" +
+        "  relation[\"name\"][\"wikidata\"][!\"shop\"](around:$radiusMeters,$lat,$lon);\n" +
         ");\n" +
         "out body center $cap;"
     }
@@ -393,6 +395,7 @@ class PoiRepository @Inject constructor(
             "  way[\"name\"][\"historic\"~\"castle|monument|archaeological_site|ruins|memorial|palace|city_wall|city_gate|pagoda|temple\"]($a);",
             "  node[\"name\"][\"leisure\"=\"stadium\"][\"wikipedia\"]($a);\n  way[\"name\"][\"leisure\"=\"stadium\"][\"wikipedia\"]($a);",
             "  node[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"]($a);\n  way[\"name\"][\"aerialway\"~\"gondola|cable_car|funicular\"]($a);",
+            "  way[\"name\"][\"wikidata\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"]($a);\n  relation[\"name\"][\"wikidata\"][!\"shop\"][\"place\"!~\"city|town|village|hamlet|suburb|county|state|country|region|district|municipality|borough\"]($a);",
         )
 
         val shardB = shard(
